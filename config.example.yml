@@ -1,0 +1,33 @@
+general:
+  plex_only: false
+  limit_plex_results: 5
+  limit_trakt_results: 5
+  exclude_genre: 'animation, documentary'
+  show_summary: true
+
+paths:
+  platform: windows
+  path_mappings: null
+
+plex:
+  library_title: TV Shows
+  token: "YOUR_PLEX_TOKEN"
+  url: "http://localhost:32400"
+  add_label: true
+  label_name: "RecommendedMovies"
+  remove_previous_recommendations: false
+
+radarr:
+  api_key: "YOUR_RADARR_API_KEY"
+  url: "http://localhost:7878/radarr/api/v3"
+  root_folder: "P:/Movies"
+  add_to_radarr: false
+  quality_profile: "HD-1080p"
+  radarr_tag: "RecommendForPlex"
+  monitor: true
+
+
+trakt:
+  access_token: "YOUR_TRAKT_ACCESS_TOKEN"
+  client_id: "YOUR_TRAKT_CLIENT_ID"
+  client_secret: "YOUR_TRAKT_CLIENT_SECRET"
