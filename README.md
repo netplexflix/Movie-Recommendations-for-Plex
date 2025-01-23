@@ -99,8 +99,9 @@ paths:
 - **radarr_tag:** Add a Radarr tag to added movies
 - **monitor:** `true` will add movies as monitored and trigger a search. `false` will add them unmonitored without searching.
 
-
-
+### Trakt Settings
+Your Trakt API credentials can be found in Trakt under settings => [Your Trakt Apps](https://trakt.tv/oauth/applications) </br>
+[More info here](https://trakt.docs.apiary.io/#)
 
 ---
 
