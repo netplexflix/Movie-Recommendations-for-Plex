@@ -1,33 +1,33 @@
 general:
-  plex_only: false
+  exclude_genre: animation, documentary
   limit_plex_results: 5
   limit_trakt_results: 5
-  exclude_genre: 'animation, documentary'
+  plex_only: false
   show_summary: true
-
+  keep_logs: 10
+  confirm_operations: true
 paths:
-  platform: windows
   path_mappings: null
-
+  platform: windows
 plex:
-  library_title: TV Shows
-  token: "YOUR_PLEX_TOKEN"
-  url: "http://localhost:32400"
   add_label: true
-  label_name: "RecommendedMovies"
-  remove_previous_recommendations: false
-
+  label_name: RecommendedMovies
+  library_title: TV Shows
+  remove_previous_recommendations: true
+  token: YOUR_PLEX_TOKEN
+  url: http://localhost:32400
 radarr:
-  api_key: "YOUR_RADARR_API_KEY"
-  url: "http://localhost:7878/radarr/api/v3"
-  root_folder: "P:/Movies"
-  add_to_radarr: false
-  quality_profile: "HD-1080p"
-  radarr_tag: "RecommendForPlex"
+  add_to_radarr: true
+  api_key: YOUR_RADARR_API_KEY
   monitor: true
-
-
+  quality_profile: HD-1080p
+  radarr_tag: RecommendedMovies
+  root_folder: P:\Movies
+  url: http://localhost:7878
 trakt:
-  access_token: "YOUR_TRAKT_ACCESS_TOKEN"
-  client_id: "YOUR_TRAKT_CLIENT_ID"
-  client_secret: "YOUR_TRAKT_CLIENT_SECRET"
+  access_token: 
+  client_id: YOUR_TRAKT_CLIENT_ID
+  client_secret: YOUR_TRAKT_SECRET
+TMDB:
+  use_TMDB_keywords: true
+  api_key: YOUR_TMDB_API_KEY
