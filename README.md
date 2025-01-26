@@ -1,23 +1,29 @@
 # 🎬 Movie Recommendations for Plex 🎯
 
-This script analyzes your viewing patterns and suggests movies you might enjoy, both from your existing unwatched library and from Trakt's recommendations.
+This script analyzes your Plex viewing patterns and suggests movies you might enjoy, both from your existing unwatched library and from Trakt's recommendations.
 It can then
 * label unwatched recommended movies in Plex (to create a collection)
 * add new recommendations to Radarr
 
-Requires [Plex](https://www.plex.tv/), [Trakt API](https://trakt.docs.apiary.io/#) and [Radarr](https://radarr.video/) (optional)
+Requires [Plex](https://www.plex.tv/)
+
+Optionally requires: 
+   - [TMDB API Key](https://developer.themoviedb.org/docs/getting-started) (for better matching)
+   - [Trakt API](https://trakt.docs.apiary.io/#) (for movie suggestions outside of your existing library)
+   - [Radarr](https://radarr.video/) (for adding new recommendations)
 
 ---
 
 ## ✨ Features
 - 🧠 **Smart Recommendations**: Analyzes your watch history to understand your preferences
-- 🏷️ **Label Management**: Automatically labels recommended movies in Plex
+- 🏷️ **Label Management**: Labels recommended movies in Plex
 - 🎯 **Radarr Integration**: Adds external recommendations to your Radarr wanted list
 - ☑ **Selection**: Select which recommendations you wish to label and/or add to Radarr
 - 🔍 **Genre Filtering**: Excludes unwanted genres from recommendations
-- 📊 **Rating-Based**: Uses IMDb ratings to ensure quality recommendations
+- 📊 **Rating-Based**: Uses ratings to ensure quality recommendations
 - 🌟 **Trakt Integration**: Gets personalized recommendations from Trakt
 - 💾 **Path Mapping**: Supports different system configurations (NAS, Linux, Windows)
+- 📒 **Logging**: Keep desired amount of run logs
 
 ---
 ## 🧙‍♂️ How are recommendations picked?
