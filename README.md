@@ -162,7 +162,7 @@ Adding labels instead of directly creating a collection gives you more freedom t
 
 ### ⚠️ Need Help or have Feedback?
 - Open an [Issue](https://github.com/netplexflix/Movie-Recommendations-for-Plex/issues) on GitHub
-- Join our [Discord](https://discord.gg/sWQ5m2qM)
+- Join our [Discord](https://discord.gg/VBNUJd7tx3)
 
 ---
 
