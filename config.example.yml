@@ -1,9 +1,12 @@
 general:
   exclude_genre: animation, documentary
-  limit_plex_results: 5
-  limit_trakt_results: 5
+  limit_plex_results: 3
+  limit_trakt_results: 3
   plex_only: false
   show_summary: true
+  show_cast: true
+  show_director: true
+  show_language: true
   keep_logs: 10
   confirm_operations: true
 paths:
@@ -12,22 +15,22 @@ paths:
 plex:
   add_label: true
   label_name: RecommendedMovies
-  library_title: TV Shows
+  library_title: Movies
   remove_previous_recommendations: true
   token: YOUR_PLEX_TOKEN
   url: http://localhost:32400
 radarr:
   add_to_radarr: true
   api_key: YOUR_RADARR_API_KEY
-  monitor: true
+  monitor: false
   quality_profile: HD-1080p
-  radarr_tag: RecommendedMovies
+  radarr_tag: RecommendedForPlex
   root_folder: P:\Movies
   url: http://localhost:7878
 trakt:
-  access_token: 
   client_id: YOUR_TRAKT_CLIENT_ID
   client_secret: YOUR_TRAKT_SECRET
+  sync_watch_history: false
 TMDB:
   use_TMDB_keywords: true
   api_key: YOUR_TMDB_API_KEY
