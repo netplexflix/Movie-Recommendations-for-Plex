@@ -21,7 +21,8 @@ Optionally requires:
 - ☑ **Selection**: Select which recommendations you wish to label and/or add to Radarr
 - 🔍 **Genre Filtering**: Excludes unwanted genres from recommendations
 - 📊 **Rating-Based**: Uses ratings to ensure quality recommendations
-- 🌟 **Trakt Integration**: Gets personalized recommendations from Trakt
+- ☑️ **Trakt Integration**: Uploads your Plex watch history to Trakt and gets personalized recommendations
+- 🗃️ **Caching**: Keeps a cache of operations to speed up subsequent runs and limit API calls
 - 💾 **Path Mapping**: Supports different system configurations (NAS, Linux, Windows)
 - 📒 **Logging**: Keep desired amount of run logs
 
@@ -73,6 +74,9 @@ Rename `config.example.yml` to `config.yml` and set up your credentials and pref
 - **limit_trakt_results:** Limit amount of recommended movies from outside your Plex library.
 - **plex_only:** Set to `true` if you only want recommendations among your unwatched Plex Movies. Set to `false` if you also want external recommendations (to optionally add to Radarr).
 - **show_summary:** `true` will show you a brief plot summary for each movie.
+- **show_cast:** `true` will show top 3 cast members.
+- **show_director:** `true` will show the director.
+- **show_language:** `true` will show main movie language.
 - **keep_logs:** The amount of logs to keep of your runs. set to `0` to disable logging
 - **confirm_operations:** `true` will prompt you for extra confirmation for applying labels in plex (If `add_label` is `true`) or adding to radarr (If `add_to_radarr` is `true`)
 
@@ -107,7 +111,7 @@ paths:
 ### Plex Settings
 - **add_label:** Adds label to the recommended Movies in your Plex library if set to `true`
 - **label_name:** The label to be used
-- **library_title:** The title of your TV Show Library
+- **library_title:** The title of your Movie Library
 - **remove_previous_recommendations:** If set to `true` removes the label from previously recommendation runs. If set to `false' simply appends the new recommendations.
 - **token:** [Finding your Plex Token](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/)
 - **url:** Edit if needed.
@@ -122,11 +126,11 @@ paths:
 - **url:** Change if needed
  
 ### Trakt Settings
-Your Trakt API credentials can be found in Trakt under settings => [Your Trakt Apps](https://trakt.tv/oauth/applications) </br>
-[More info here](https://trakt.docs.apiary.io/#)
+- Your Trakt API credentials can be found in Trakt under settings => [Your Trakt Apps](https://trakt.tv/oauth/applications) [More info here](https://trakt.docs.apiary.io/#)
+- **sync_watch_history:** Can be set to `false` if you already build your Trakt watch history another way (e.g.: through Trakt's Plex Scrobbler).
 
 ### TMDB Settings
-- **use_TMDB_keywords:** `true` uses TMDB (plot)keywords for matching (Recommended!). In this case an api_key is required.
+- **use_TMDB_keywords:** `true` uses TMDB (plot)keywords for matching (Recommended). In this case an api_key is required.
 - **api_key:** [How to get a TMDB API Key](https://developer.themoviedb.org/docs/getting-started)
 
 ---
