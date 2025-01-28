@@ -1,37 +1,51 @@
 general:
-  exclude_genre: animation, documentary
+  confirm_operations: true
+  plex_only: false
   limit_plex_results: 3
   limit_trakt_results: 3
-  plex_only: false
+  exclude_genre: animation, documentary
   show_summary: true
   show_cast: true
   show_director: true
   show_language: true
   show_imdb_link: true
   keep_logs: 10
-  confirm_operations: true
+
 paths:
   path_mappings: null
   platform: windows
+
 plex:
+  url: http://localhost:32400
+  token: YOUR_PLEX_TOKEN
+  library_title: Movies
   add_label: true
   label_name: RecommendedMovies
-  library_title: Movies
   remove_previous_recommendations: true
-  token: YOUR_PLEX_TOKEN
-  url: http://localhost:32400
+
 radarr:
-  add_to_radarr: true
+  url: http://localhost:7878
   api_key: YOUR_RADARR_API_KEY
+  root_folder: P:\Movies
+  add_to_radarr: true
   monitor: false
   quality_profile: HD-1080p
   radarr_tag: RecommendedForPlex
-  root_folder: P:\Movies
-  url: http://localhost:7878
+
+
+
 trakt:
   client_id: YOUR_TRAKT_CLIENT_ID
   client_secret: YOUR_TRAKT_SECRET
   sync_watch_history: false
+
 TMDB:
   use_TMDB_keywords: true
   api_key: YOUR_TMDB_API_KEY
+
+weights: #Make sure the total equals 1
+  genre_weight: 0.25
+  keyword_weight: 0.25
+  director_weight: 0.20
+  actor_weight: 0.20
+  language_weight: 0.10

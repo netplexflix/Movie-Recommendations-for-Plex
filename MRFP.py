@@ -78,7 +78,6 @@ def check_version():
     except Exception as e:
         print(f"{YELLOW}Unable to check for updates: {str(e)}{RESET}")
 
-
 class PlexMovieRecommender:
     def __init__(self, config_path: str):
         print("Initializing recommendation system...")
@@ -88,7 +87,6 @@ class PlexMovieRecommender:
         self.plex = self._init_plex()
         print(f"Connected to Plex successfully!\n")
         
-        # Load general settings
         general_config = self.config.get('general', {})
         self.confirm_operations = general_config.get('confirm_operations', False)
         self.limit_plex_results = general_config.get('limit_plex_results', 10)
@@ -98,12 +96,24 @@ class PlexMovieRecommender:
         self.show_cast = general_config.get('show_cast', False)
         self.show_director = general_config.get('show_director', False)
         self.show_language = general_config.get('show_language', False)
-        self.show_imdb_link = general_config.get('show_imdb_link', False)  # New variable
+        self.show_imdb_link = general_config.get('show_imdb_link', False)
         
         exclude_genre_str = general_config.get('exclude_genre', '')
         self.exclude_genres = [g.strip().lower() for g in exclude_genre_str.split(',') if g.strip()] if exclude_genre_str else []
-        
-        # Trakt
+
+        weights_config = self.config.get('weights', {})
+        self.weights = {
+            'genre_weight': float(weights_config.get('genre_weight', 0.25)),
+            'director_weight': float(weights_config.get('director_weight', 0.20)),
+            'actor_weight': float(weights_config.get('actor_weight', 0.20)),
+            'language_weight': float(weights_config.get('language_weight', 0.10)),
+            'keyword_weight': float(weights_config.get('keyword_weight', 0.25))
+        }
+
+        total_weight = sum(self.weights.values())
+        if not abs(total_weight - 1.0) < 1e-6:
+            print(f"{YELLOW}Warning: Weights sum to {total_weight}, expected 1.0.{RESET}")
+			
         trakt_config = self.config.get('trakt', {})
         self.sync_watch_history = trakt_config.get('sync_watch_history', False)
         self.trakt_headers = {
@@ -116,20 +126,16 @@ class PlexMovieRecommender:
         else:
             self._authenticate_trakt()
 
-        # TMDB config
         tmdb_config = self.config.get('TMDB', {})
         self.use_tmdb_keywords = tmdb_config.get('use_TMDB_keywords', False)
         self.tmdb_api_key = tmdb_config.get('api_key', None)
 
-        # Radarr config
         self.radarr_config = self.config.get('radarr', {})
 
-        # Prepare a cache directory
         self.cache_dir = os.path.join(os.path.dirname(__file__), "cache")
         os.makedirs(self.cache_dir, exist_ok=True)
         self.cache_path = os.path.join(self.cache_dir, "watched_data_cache.json")
 
-        # Load existing cache if available
         (self.cached_watched_count,
          self.watched_data_counters,
          self.plex_tmdb_cache,
@@ -138,17 +144,16 @@ class PlexMovieRecommender:
          self.cached_unwatched_count,
          self.cached_unwatched_movies) = self._load_cache()
 
-        # If we didn't have caches for TMDB IDs or keywords, create empty
         if self.plex_tmdb_cache is None:
             self.plex_tmdb_cache = {}
         if self.tmdb_keywords_cache is None:
             self.tmdb_keywords_cache = {}
         
-        # Ensure synced_trakt_history is always initialized
         if not hasattr(self, 'synced_trakt_history'):
             self.synced_trakt_history = {}
 
-        # If the user has changed the watched count, re-scan
+        self.library_title = self.config['plex'].get('library_title', 'Movies')
+
         current_watched_count = self._get_watched_count()
         if current_watched_count != self.cached_watched_count:
             print("Watched count changed or no cache found; gathering watched data now. This may take a while...\n")
@@ -159,7 +164,6 @@ class PlexMovieRecommender:
             print("Watched count unchanged. Using cached watched data for faster performance.\n")
             self.watched_data = self.watched_data_counters
 
-        # Get all movies in Plex library
         print("Fetching library metadata (for existing movie checks)...")
         self.library_movies = self._get_library_movies_set()
 
@@ -177,7 +181,6 @@ class PlexMovieRecommender:
             raise
 
     def _init_plex(self) -> plexapi.server.PlexServer:
-        import plexapi.server
         try:
             return plexapi.server.PlexServer(
                 self.config['plex']['url'],
@@ -255,8 +258,6 @@ class PlexMovieRecommender:
             self.synced_trakt_history = {}
             return None, None, None, None, None, None, []
 
-        # We'll also store a separate field for 'synced_trakt_history'
-        # If not present, default to {}
         self.synced_trakt_history = data.get('synced_trakt_history', {})
         
         return (
@@ -288,7 +289,7 @@ class PlexMovieRecommender:
 
     def _get_watched_count(self) -> int:
         try:
-            movies_section = self.plex.library.section('Movies')
+            movies_section = self.plex.library.section(self.library_title)
             watched_movies = movies_section.search(unwatched=False)
             return len(watched_movies)
         except:
@@ -328,7 +329,7 @@ class PlexMovieRecommender:
     # ------------------------------------------------------------------------
     def _get_library_movies_set(self) -> Set[Tuple[str, Optional[int]]]:
         try:
-            movies = self.plex.library.section('Movies')
+            movies = self.plex.library.section(self.library_title)
             return {(movie.title.lower(), getattr(movie, 'year', None)) for movie in movies.all()}
         except Exception as e:
             print(f"{RED}Error getting library movies: {e}{RESET}")
@@ -374,7 +375,6 @@ class PlexMovieRecommender:
                     data = resp.json()
                     results = data.get('results', [])
                     if results:
-                        # attempt exact match on release_date if year is known
                         if year:
                             for r in results:
                                 if r.get('release_date', '').startswith(str(year)):
@@ -389,17 +389,12 @@ class PlexMovieRecommender:
         return tmdb_id
 
     def _get_plex_movie_imdb_id(self, plex_movie) -> Optional[str]:
-        """
-        Retrieves the IMDb ID for a given Plex movie.
-        """
-        # Attempt to extract IMDb ID from Plex GUIDs
         if not plex_movie.guids:
             return None
         for guid in plex_movie.guids:
             if guid.id.startswith('imdb://'):
                 return guid.id.split('imdb://')[1]
         
-        # If IMDb ID not found in GUIDs, use TMDB ID to fetch it
         tmdb_id = self._get_plex_movie_tmdb_id(plex_movie)
         if not tmdb_id:
             return None
@@ -438,17 +433,15 @@ class PlexMovieRecommender:
         self.tmdb_keywords_cache[tmdb_id] = list(kw_set)
         return kw_set
 
-    # ------------------------------------------------------------------------
-    # GATHER WATCHED MOVIES DATA
-    # ------------------------------------------------------------------------
     def _get_watched_movies_data(self) -> Dict:
         genre_counter = Counter()
         director_counter = Counter()
         actor_counter = Counter()
         tmdb_keyword_counter = Counter()
+        language_counter = Counter()
 
         try:
-            movies_section = self.plex.library.section('Movies')
+            movies_section = self.plex.library.section(self.library_title)
             watched_movies = movies_section.search(unwatched=False)
             total_watched = len(watched_movies)
 
@@ -456,28 +449,49 @@ class PlexMovieRecommender:
             for i, movie in enumerate(watched_movies, start=1):
                 self._show_progress("Analyzing watched movies", i, total_watched)
 
-                # Count genres
+                user_rating = getattr(movie, 'userRating', None)
+                if user_rating is not None:
+                    rating_weight = float(user_rating) / 10.0
+                    rating_weight = min(max(rating_weight, 0.1), 1.0)
+                else:
+                    rating_weight = 0.5
+
                 if hasattr(movie, 'genres') and movie.genres:
                     for g in movie.genres:
-                        genre_counter[g.tag.lower()] += 1
+                        genre_counter[g.tag.lower()] += rating_weight
 
-                # Count directors
                 if hasattr(movie, 'directors') and movie.directors:
                     for d in movie.directors:
-                        director_counter[d.tag] += 1
+                        director_counter[d.tag] += rating_weight
 
-                # Count actors
                 if hasattr(movie, 'roles') and movie.roles:
                     for a in movie.roles:
-                        actor_counter[a.tag] += 1
+                        actor_counter[a.tag] += rating_weight
 
-                # Optional TMDB keywords
+                if self.show_language:
+                    try:
+                        media = movie.media[0]
+                        part = media.parts[0]
+                        audio_streams = part.audioStreams()
+                        if audio_streams:
+                            primary_audio = audio_streams[0]
+                            lang_code = (
+                                getattr(primary_audio, 'languageTag', None) or
+                                getattr(primary_audio, 'languageCode', None) or
+                                getattr(primary_audio, 'language', None)
+                            )
+                            if lang_code:
+                                language = get_full_language_name(lang_code)
+                                language_counter[language.lower()] += rating_weight
+                    except:
+                        pass
+
                 if self.use_tmdb_keywords and self.tmdb_api_key:
                     tmdb_id = self._get_plex_movie_tmdb_id(movie)
                     if tmdb_id:
                         keywords = self._get_tmdb_keywords_for_id(tmdb_id)
                         for kw in keywords:
-                            tmdb_keyword_counter[kw] += 1
+                            tmdb_keyword_counter[kw] += rating_weight
 
             print()
 
@@ -488,7 +502,8 @@ class PlexMovieRecommender:
             'genres': dict(genre_counter),
             'directors': dict(director_counter),
             'actors': dict(actor_counter),
-            'tmdb_keywords': dict(tmdb_keyword_counter)
+            'tmdb_keywords': dict(tmdb_keyword_counter),
+            'languages': dict(language_counter)
         }
 
     def _show_progress(self, prefix: str, current: int, total: int):
@@ -508,7 +523,7 @@ class PlexMovieRecommender:
         
         print(f"{YELLOW}Syncing Plex watch history to Trakt...{RESET}")
     
-        movies_section = self.plex.library.section('Movies')
+        movies_section = self.plex.library.section(self.library_title)
         watched_movies = movies_section.search(unwatched=False)
     
         to_sync = []
@@ -521,7 +536,7 @@ class PlexMovieRecommender:
             if rk_str in self.synced_trakt_history:
                 skipped_synced += 1
                 continue
-		
+        
             last_viewed = getattr(movie, 'lastViewedAt', None)
             if not last_viewed:
                 continue
@@ -623,38 +638,31 @@ class PlexMovieRecommender:
         print(f"Skipped {skipped_synced} Plex items already synced to Trakt.")
         print(f"Done syncing watch history to Trakt!")
 
-    # ------------------------------------------------------------------------
-    # SCORING / RECOMMENDATIONS
-    # ------------------------------------------------------------------------
     def calculate_movie_score(self, movie) -> float:
-        from collections import Counter
         user_genres = Counter(self.watched_data['genres'])
         user_dirs = Counter(self.watched_data['directors'])
         user_acts = Counter(self.watched_data['actors'])
         user_kws  = Counter(self.watched_data['tmdb_keywords'])
+        user_langs = Counter(self.watched_data.get('languages', {}))  # Use .get to avoid KeyError
 
-        weights = {
-            'genre_weight': 0.4,
-            'director_weight': 0.3,
-            'actor_weight': 0.2,
-            'keyword_weight': 0.1
-        }
+        weights = self.weights
 
         max_genre_count = max(user_genres.values(), default=1)
         max_director_count = max(user_dirs.values(), default=1)
         max_actor_count = max(user_acts.values(), default=1)
         max_keyword_count = max(user_kws.values(), default=1)
+        max_language_count = max(user_langs.values(), default=1)
 
         score = 0.0
         if hasattr(movie, 'genres') and movie.genres:
             movie_genres = {g.tag.lower() for g in movie.genres}
             gscore = 0.0
             for mg in movie_genres:
-                gcount = user_genres[mg]
+                gcount = user_genres.get(mg, 0)
                 gscore += (gcount / max_genre_count) if max_genre_count else 0
             if len(movie_genres) > 0:
                 gscore /= len(movie_genres)
-            score += gscore * weights['genre_weight']
+            score += gscore * weights.get('genre_weight', 0.25)
 
         if hasattr(movie, 'directors') and movie.directors:
             dscore = 0.0
@@ -665,7 +673,7 @@ class PlexMovieRecommender:
                     dscore += (user_dirs[d.tag] / max_director_count)
             if matched_dirs > 0:
                 dscore /= matched_dirs
-            score += dscore * weights['director_weight']
+            score += dscore * weights.get('director_weight', 0.20)
 
         if hasattr(movie, 'roles') and movie.roles:
             ascore = 0.0
@@ -678,7 +686,27 @@ class PlexMovieRecommender:
                 ascore *= (3 / matched_actors)
             if matched_actors > 0:
                 ascore /= matched_actors
-            score += ascore * weights['actor_weight']
+            score += ascore * weights.get('actor_weight', 0.15)
+
+        if hasattr(movie, 'media') and self.show_language:
+            try:
+                media = movie.media[0]
+                part = media.parts[0]
+                audio_streams = part.audioStreams()
+                if audio_streams:
+                    primary_audio = audio_streams[0]
+                    lang_code = (
+                        getattr(primary_audio, 'languageTag', None) or
+                        getattr(primary_audio, 'languageCode', None) or
+                        getattr(primary_audio, 'language', None)
+                    )
+                    if lang_code:
+                        language = get_full_language_name(lang_code).lower()
+                        lcount = user_langs.get(language, 0)
+                        lscore = (lcount / max_language_count) if max_language_count else 0
+                        score += lscore * weights.get('language_weight', 0.10)
+            except:
+                pass
 
         if self.use_tmdb_keywords and self.tmdb_api_key:
             tmdb_id = self._get_plex_movie_tmdb_id(movie)
@@ -687,13 +715,13 @@ class PlexMovieRecommender:
                 kwscore = 0.0
                 matched_kw = 0
                 for kw in keywords:
-                    count = user_kws[kw]
+                    count = user_kws.get(kw, 0)
                     if count > 0:
                         matched_kw += 1
                         kwscore += (count / max_keyword_count)
                 if matched_kw > 0:
                     kwscore /= matched_kw
-                score += kwscore * weights['keyword_weight']
+                score += kwscore * weights.get('keyword_weight', 0.25)
 
         return score
 
@@ -715,7 +743,7 @@ class PlexMovieRecommender:
         cast_list = []
         director_name = "N/A"
         language_str = "N/A"
-        imdb_id = None  # Initialize IMDb ID
+        imdb_id = None
 
         if self.show_cast or self.show_director:
             if hasattr(movie, 'roles'):
@@ -731,18 +759,17 @@ class PlexMovieRecommender:
                 audio_streams = part.audioStreams()
                 if audio_streams:
                     primary_audio = audio_streams[0]
-                    # Prefer languageTag, then languageCode, then language
                     lang_code = (
                         getattr(primary_audio, 'languageTag', None) or
                         getattr(primary_audio, 'languageCode', None) or
                         getattr(primary_audio, 'language', None)
                     )
                     if lang_code:
-                        language_str = get_full_language_name(lang_code)
+                        language = get_full_language_name(lang_code).lower()
+                        language_str = language.capitalize()
             except:
                 pass
 
-        # Retrieve IMDb ID if required
         if self.show_imdb_link:
             try:
                 imdb_id = self._get_plex_movie_imdb_id(movie)
@@ -759,12 +786,12 @@ class PlexMovieRecommender:
             'cast': cast_list,
             'director': director_name,
             'language': language_str,
-            'imdb_id': imdb_id  # New field
+            'imdb_id': imdb_id
         }
 
     def get_unwatched_library_movies(self) -> List[Dict]:
         print(f"\n{YELLOW}Fetching unwatched movies from Plex library...{RESET}")
-        movies_section = self.plex.library.section('Movies')
+        movies_section = self.plex.library.section(self.library_title)
         
         current_all = movies_section.all()
         current_all_count = len(current_all)
@@ -793,10 +820,6 @@ class PlexMovieRecommender:
         return unwatched_details
 
     def get_trakt_recommendations(self) -> List[Dict]:
-        """
-        Fetch Trakt recommended movies, then if show_cast / show_director / show_language is True,
-        do a TMDB lookup for each item to fill those fields (top 3 cast, 1 director, original_language).
-        """
         print(f"{YELLOW}Fetching recommendations from Trakt...{RESET}")
         try:
             url = "https://api.trakt.tv/recommendations/movies"
@@ -819,11 +842,9 @@ class PlexMovieRecommender:
 
                 recs = []
                 for movie in movies:
-                    # skip if already in library
                     if self._is_movie_in_library(movie['title'], movie.get('year')):
                         continue
 
-                    # Basic info
                     ratings = {
                         'imdb_rating': round(float(movie.get('rating', 0)), 1),
                         'votes': movie.get('votes', 0)
@@ -834,25 +855,20 @@ class PlexMovieRecommender:
                         'ratings': ratings,
                         'summary': movie.get('overview', ''),
                         'genres': [g.lower() for g in movie.get('genres', [])],
-                        'cast': [],        # Will fill via TMDB below
-                        'director': "N/A", # same
-                        'language': "N/A",  # same
-                        'imdb_id': movie['ids'].get('imdb') if 'ids' in movie else None  # New field
+                        'cast': [],
+                        'director': "N/A",
+                        'language': "N/A",
+                        'imdb_id': movie['ids'].get('imdb') if 'ids' in movie else None
                     }
 
-                    # skip excluded genres
                     if any(g in self.exclude_genres for g in md['genres']):
                         continue
 
-                    # If we want cast/director/language, do a TMDB fetch
                     tmdb_id = None
                     if 'ids' in movie and isinstance(movie['ids'], dict):
                         tmdb_id = movie['ids'].get('tmdb')
 
                     if tmdb_id and self.tmdb_api_key:
-                        # If show_language => fetch /movie/{tmdb_id} for original_language
-                        # If show_cast/director => fetch /movie/{tmdb_id}/credits
-                        # we can do both calls if needed
                         if self.show_language:
                             try:
                                 resp_lang = requests.get(
@@ -875,12 +891,10 @@ class PlexMovieRecommender:
                                 resp_credits.raise_for_status()
                                 c_data = resp_credits.json()
 
-                                # top 3 cast
                                 if self.show_cast and 'cast' in c_data:
                                     c_sorted = c_data['cast'][:3]
                                     md['cast'] = [c['name'] for c in c_sorted]
 
-                                # first director
                                 if self.show_director and 'crew' in c_data:
                                     directors = [p for p in c_data['crew'] if p.get('job') == 'Director']
                                     if directors:
@@ -890,7 +904,6 @@ class PlexMovieRecommender:
 
                     recs.append(md)
                 
-                # Now pick top 50% by rating, then random sample
                 half_cut = max(int(len(recs) * 0.5), 1)
                 top_half = recs[:half_cut]
                 top_half.sort(key=lambda x: x.get('ratings', {}).get('imdb_rating', 0), reverse=True)
@@ -999,7 +1012,7 @@ class PlexMovieRecommender:
             selected_movies = recommended_movies
 
         try:
-            movies_section = self.plex.library.section('Movies')
+            movies_section = self.plex.library.section(self.library_title)
             label_name = self.config['plex'].get('label_name', 'Recommended')
 
             movies_to_update = []
@@ -1048,7 +1061,7 @@ class PlexMovieRecommender:
             print(f"{YELLOW}No movies to add to Radarr.{RESET}")
             return
 
-        if not self.config['radarr'].get('add_to_radarr'):
+        if not self.radarr_config.get('add_to_radarr'):
             return
 
         if self.confirm_operations:
@@ -1063,18 +1076,18 @@ class PlexMovieRecommender:
                 raise ValueError("Radarr configuration missing from config file")
 
             required_fields = ['url', 'api_key', 'root_folder', 'quality_profile']
-            missing_fields = [f for f in required_fields if f not in self.config['radarr']]
+            missing_fields = [f for f in required_fields if f not in self.radarr_config]
             if missing_fields:
                 raise ValueError(f"Missing required Radarr config fields: {', '.join(missing_fields)}")
 
-            radarr_url = self.config['radarr']['url'].rstrip('/')
+            radarr_url = self.radarr_config['url'].rstrip('/')
             if '/api/' not in radarr_url:
                 if '/radarr' not in radarr_url:
                     radarr_url += '/radarr'
                 radarr_url += '/api/v3'
 
             headers = {
-                'X-Api-Key': self.config['radarr']['api_key'],
+                'X-Api-Key': self.radarr_config['api_key'],
                 'Content-Type': 'application/json'
             }
             trakt_headers = self.trakt_headers
@@ -1086,35 +1099,35 @@ class PlexMovieRecommender:
                 raise ValueError(f"Failed to connect to Radarr: {str(e)}")
 
             tag_id = None
-            if self.config['radarr'].get('radarr_tag'):
+            if self.radarr_config.get('radarr_tag'):
                 tags_response = requests.get(f"{radarr_url}/tag", headers=headers)
                 tags_response.raise_for_status()
                 tags = tags_response.json()
-                tag = next((t for t in tags if t['label'].lower() == self.config['radarr']['radarr_tag'].lower()), None)
+                tag = next((t for t in tags if t['label'].lower() == self.radarr_config['radarr_tag'].lower()), None)
                 if tag:
                     tag_id = tag['id']
                 else:
                     tag_response = requests.post(
                         f"{radarr_url}/tag",
                         headers=headers,
-                        json={'label': self.config['radarr']['radarr_tag']}
+                        json={'label': self.radarr_config['radarr_tag']}
                     )
                     tag_response.raise_for_status()
                     tag_id = tag_response.json()['id']
-                    print(f"{GREEN}Created new Radarr tag: {self.config['radarr']['radarr_tag']} (ID: {tag_id}){RESET}")
+                    print(f"{GREEN}Created new Radarr tag: {self.radarr_config['radarr_tag']} (ID: {tag_id}){RESET}")
 
             profiles_response = requests.get(f"{radarr_url}/qualityprofile", headers=headers)
             profiles_response.raise_for_status()
             quality_profiles = profiles_response.json()
             desired_profile = next(
                 (p for p in quality_profiles
-                 if p['name'].lower() == self.config['radarr']['quality_profile'].lower()),
+                 if p['name'].lower() == self.radarr_config['quality_profile'].lower()),
                 None
             )
             if not desired_profile:
                 available = [p['name'] for p in quality_profiles]
                 raise ValueError(
-                    f"Quality profile '{self.config['radarr']['quality_profile']}' not found. "
+                    f"Quality profile '{self.radarr_config['quality_profile']}' not found. "
                     f"Available: {', '.join(available)}"
                 )
             quality_profile_id = desired_profile['id']
@@ -1153,8 +1166,8 @@ class PlexMovieRecommender:
                         print(f"{YELLOW}Already in Radarr: {movie['title']}{RESET}")
                         continue
 
-                    root_folder = self._map_path(self.config['radarr']['root_folder'].rstrip('/\\'))
-                    should_monitor = self.config['radarr'].get('monitor', False)
+                    root_folder = self._map_path(self.radarr_config['root_folder'].rstrip('/\\'))
+                    should_monitor = self.radarr_config.get('monitor', False)
 
                     movie_data = {
                         'tmdbId': tmdb_id,
@@ -1196,7 +1209,6 @@ class PlexMovieRecommender:
             import traceback
             print(traceback.format_exc())
 
-
 # ------------------------------------------------------------------------
 # OUTPUT FORMATTING
 # ------------------------------------------------------------------------
@@ -1222,20 +1234,16 @@ def format_movie_output(movie: Dict,
     if show_summary and movie.get('summary'):
         output += f"\n  {YELLOW}Summary:{RESET} {movie['summary']}"
 
-    # Show cast
     if show_cast and 'cast' in movie and movie['cast']:
         cast_str = ', '.join(movie['cast'])
         output += f"\n  {YELLOW}Cast:{RESET} {cast_str}"
 
-    # Show director
     if show_director and 'director' in movie and movie['director'] != "N/A":
         output += f"\n  {YELLOW}Director:{RESET} {movie['director']}"
 
-    # Show language
     if show_language and 'language' in movie and movie['language'] != "N/A":
         output += f"\n  {YELLOW}Language:{RESET} {movie['language']}"
 
-    # Show IMDb link
     if show_imdb_link and 'imdb_id' in movie and movie['imdb_id']:
         imdb_link = f"https://www.imdb.com/title/{movie['imdb_id']}/"
         output += f"\n  {YELLOW}IMDb Link:{RESET} {imdb_link}"
@@ -1311,7 +1319,6 @@ def main():
             cleanup_old_logs(log_dir, keep_logs)
         except Exception as e:
             print(f"{RED}Could not set up logging: {e}{RESET}")
-            # fallback
 
     try:
         recommender = PlexMovieRecommender(config_path)
@@ -1328,10 +1335,9 @@ def main():
                     show_cast=recommender.show_cast,
                     show_director=recommender.show_director,
                     show_language=recommender.show_language,
-                    show_imdb_link=recommender.show_imdb_link  # New argument
+                    show_imdb_link=recommender.show_imdb_link
                 ))
                 print()
-            # Manage Plex labels if configured
             recommender.manage_plex_labels(plex_recs)
         else:
             print(f"{YELLOW}No recommendations found in your Plex library matching your criteria.{RESET}")
@@ -1348,15 +1354,13 @@ def main():
                         show_cast=recommender.show_cast,
                         show_director=recommender.show_director,
                         show_language=recommender.show_language,
-                        show_imdb_link=recommender.show_imdb_link  # New argument
+                        show_imdb_link=recommender.show_imdb_link
                     ))
                     print()
-                # Add to Radarr
                 recommender.add_to_radarr(trakt_recs)
             else:
                 print(f"{YELLOW}No Trakt recommendations found matching your criteria.{RESET}")
 
-        # Save updated caches
         recommender._save_cache()
 
     except Exception as e:
@@ -1372,7 +1376,6 @@ def main():
             print(f"{YELLOW}Error closing log file: {e}{RESET}")
 
     print(f"\n{GREEN}Process completed!{RESET}")
-
 
 if __name__ == "__main__":
     main()
