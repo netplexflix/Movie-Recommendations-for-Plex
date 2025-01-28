@@ -13,7 +13,7 @@ import json
 from urllib.parse import quote
 import re
 
-__version__ = "2.1"
+__version__ = "2.2"
 REPO_URL = "https://github.com/netplexflix/Movie-Recommendations-for-Plex"
 API_VERSION_URL = f"https://api.github.com/repos/netplexflix/Movie-Recommendations-for-Plex/releases/latest"
 
@@ -98,6 +98,7 @@ class PlexMovieRecommender:
         self.show_cast = general_config.get('show_cast', False)
         self.show_director = general_config.get('show_director', False)
         self.show_language = general_config.get('show_language', False)
+        self.show_imdb_link = general_config.get('show_imdb_link', False)  # New variable
         
         exclude_genre_str = general_config.get('exclude_genre', '')
         self.exclude_genres = [g.strip().lower() for g in exclude_genre_str.split(',') if g.strip()] if exclude_genre_str else []
@@ -120,6 +121,9 @@ class PlexMovieRecommender:
         self.use_tmdb_keywords = tmdb_config.get('use_TMDB_keywords', False)
         self.tmdb_api_key = tmdb_config.get('api_key', None)
 
+        # Radarr config
+        self.radarr_config = self.config.get('radarr', {})
+
         # Prepare a cache directory
         self.cache_dir = os.path.join(os.path.dirname(__file__), "cache")
         os.makedirs(self.cache_dir, exist_ok=True)
@@ -139,6 +143,10 @@ class PlexMovieRecommender:
             self.plex_tmdb_cache = {}
         if self.tmdb_keywords_cache is None:
             self.tmdb_keywords_cache = {}
+        
+        # Ensure synced_trakt_history is always initialized
+        if not hasattr(self, 'synced_trakt_history'):
+            self.synced_trakt_history = {}
 
         # If the user has changed the watched count, re-scan
         current_watched_count = self._get_watched_count()
@@ -237,9 +245,15 @@ class PlexMovieRecommender:
     # ------------------------------------------------------------------------
     def _load_cache(self):
         if not os.path.exists(self.cache_path):
+            self.synced_trakt_history = {}
             return None, None, None, None, None, None, []
-        with open(self.cache_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+        try:
+            with open(self.cache_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception as e:
+            print(f"{YELLOW}Error loading cache: {e}{RESET}")
+            self.synced_trakt_history = {}
+            return None, None, None, None, None, None, []
 
         # We'll also store a separate field for 'synced_trakt_history'
         # If not present, default to {}
@@ -266,8 +280,11 @@ class PlexMovieRecommender:
             'unwatched_movie_details': self.cached_unwatched_movies,
             'synced_trakt_history': self.synced_trakt_history
         }
-        with open(self.cache_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f)
+        try:
+            with open(self.cache_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f)
+        except Exception as e:
+            print(f"{YELLOW}Error saving cache: {e}{RESET}")
 
     def _get_watched_count(self) -> int:
         try:
@@ -370,6 +387,34 @@ class PlexMovieRecommender:
 
         self.plex_tmdb_cache[plex_movie.ratingKey] = tmdb_id
         return tmdb_id
+
+    def _get_plex_movie_imdb_id(self, plex_movie) -> Optional[str]:
+        """
+        Retrieves the IMDb ID for a given Plex movie.
+        """
+        # Attempt to extract IMDb ID from Plex GUIDs
+        if not plex_movie.guids:
+            return None
+        for guid in plex_movie.guids:
+            if guid.id.startswith('imdb://'):
+                return guid.id.split('imdb://')[1]
+        
+        # If IMDb ID not found in GUIDs, use TMDB ID to fetch it
+        tmdb_id = self._get_plex_movie_tmdb_id(plex_movie)
+        if not tmdb_id:
+            return None
+        try:
+            url = f"https://api.themoviedb.org/3/movie/{tmdb_id}"
+            params = {'api_key': self.tmdb_api_key}
+            resp = requests.get(url, params=params)
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get('imdb_id')
+            else:
+                print(f"{YELLOW}Failed to fetch IMDb ID from TMDB for movie '{plex_movie.title}'. Status Code: {resp.status_code}{RESET}")
+        except Exception as e:
+            print(f"{YELLOW}Error fetching IMDb ID for TMDB ID {tmdb_id}: {e}{RESET}")
+        return None
 
     def _get_tmdb_keywords_for_id(self, tmdb_id: int) -> Set[str]:
         if not tmdb_id or not self.use_tmdb_keywords or not self.tmdb_api_key:
@@ -670,6 +715,7 @@ class PlexMovieRecommender:
         cast_list = []
         director_name = "N/A"
         language_str = "N/A"
+        imdb_id = None  # Initialize IMDb ID
 
         if self.show_cast or self.show_director:
             if hasattr(movie, 'roles'):
@@ -696,6 +742,13 @@ class PlexMovieRecommender:
             except:
                 pass
 
+        # Retrieve IMDb ID if required
+        if self.show_imdb_link:
+            try:
+                imdb_id = self._get_plex_movie_imdb_id(movie)
+            except Exception as e:
+                print(f"{YELLOW}Error fetching IMDb ID for '{movie.title}': {e}{RESET}")
+
         return {
             'title': movie.title,
             'year': getattr(movie, 'year', None),
@@ -705,7 +758,8 @@ class PlexMovieRecommender:
             'similarity_score': sim_score,
             'cast': cast_list,
             'director': director_name,
-            'language': language_str
+            'language': language_str,
+            'imdb_id': imdb_id  # New field
         }
 
     def get_unwatched_library_movies(self) -> List[Dict]:
@@ -782,7 +836,8 @@ class PlexMovieRecommender:
                         'genres': [g.lower() for g in movie.get('genres', [])],
                         'cast': [],        # Will fill via TMDB below
                         'director': "N/A", # same
-                        'language': "N/A"  # same
+                        'language': "N/A",  # same
+                        'imdb_id': movie['ids'].get('imdb') if 'ids' in movie else None  # New field
                     }
 
                     # skip excluded genres
@@ -1150,7 +1205,8 @@ def format_movie_output(movie: Dict,
                         index: Optional[int] = None,
                         show_cast: bool = False,
                         show_director: bool = False,
-                        show_language: bool = False) -> str:
+                        show_language: bool = False,
+                        show_imdb_link: bool = False) -> str:
     bullet = f"{index}. " if index is not None else "- "
     output = f"{bullet}{CYAN}{movie['title']}{RESET} ({movie.get('year', 'N/A')})"
     
@@ -1178,6 +1234,11 @@ def format_movie_output(movie: Dict,
     # Show language
     if show_language and 'language' in movie and movie['language'] != "N/A":
         output += f"\n  {YELLOW}Language:{RESET} {movie['language']}"
+
+    # Show IMDb link
+    if show_imdb_link and 'imdb_id' in movie and movie['imdb_id']:
+        imdb_link = f"https://www.imdb.com/title/{movie['imdb_id']}/"
+        output += f"\n  {YELLOW}IMDb Link:{RESET} {imdb_link}"
 
     return output
 
@@ -1214,7 +1275,10 @@ def cleanup_old_logs(log_dir: str, keep_logs: int):
     if len(all_files) > keep_logs:
         to_remove = all_files[:len(all_files) - keep_logs]
         for f in to_remove:
-            os.remove(os.path.join(log_dir, f))
+            try:
+                os.remove(os.path.join(log_dir, f))
+            except Exception as e:
+                print(f"{YELLOW}Failed to remove old log {f}: {e}{RESET}")
 
 def main():
     print(f"{CYAN}Movie Recommendations for Plex{RESET}")
@@ -1263,7 +1327,8 @@ def main():
                     index=i,
                     show_cast=recommender.show_cast,
                     show_director=recommender.show_director,
-                    show_language=recommender.show_language
+                    show_language=recommender.show_language,
+                    show_imdb_link=recommender.show_imdb_link  # New argument
                 ))
                 print()
             # Manage Plex labels if configured
@@ -1282,7 +1347,8 @@ def main():
                         index=i,
                         show_cast=recommender.show_cast,
                         show_director=recommender.show_director,
-                        show_language=recommender.show_language
+                        show_language=recommender.show_language,
+                        show_imdb_link=recommender.show_imdb_link  # New argument
                     ))
                     print()
                 # Add to Radarr
@@ -1299,8 +1365,11 @@ def main():
         print(traceback.format_exc())
 
     if keep_logs > 0 and sys.stdout is not original_stdout:
-        sys.stdout.logfile.close()
-        sys.stdout = original_stdout
+        try:
+            sys.stdout.logfile.close()
+            sys.stdout = original_stdout
+        except Exception as e:
+            print(f"{YELLOW}Error closing log file: {e}{RESET}")
 
     print(f"\n{GREEN}Process completed!{RESET}")
 
