@@ -68,19 +68,20 @@ pip install -r requirements.txt
 ## ⚙️ Configuration
 Rename `config.example.yml` to `config.yml` and set up your credentials and preferences:
 
-### General Settings
-- **exclude_genre:** Genres to exclude. E.g. "animation, documentary".
+### General
+- **confirm_operations:** `true` will prompt you for extra confirmation for applying labels in plex (If `add_label` is `true`) or adding to radarr (If `add_to_radarr` is `true`)
+- **plex_only:** Set to `true` if you only want recommendations among your unwatched Plex Movies. Set to `false` if you also want external recommendations (to optionally add to Radarr).
 - **limit_plex_results:** Limit amount of recommended unwatched movies from within your Plex library.
 - **limit_trakt_results:** Limit amount of recommended movies from outside your Plex library.
-- **plex_only:** Set to `true` if you only want recommendations among your unwatched Plex Movies. Set to `false` if you also want external recommendations (to optionally add to Radarr).
+- **exclude_genre:** Genres to exclude. E.g. "animation, documentary".
 - **show_summary:** `true` will show you a brief plot summary for each movie.
 - **show_cast:** `true` will show top 3 cast members.
 - **show_director:** `true` will show the director.
 - **show_language:** `true` will show main movie language.
-- **keep_logs:** The amount of logs to keep of your runs. set to `0` to disable logging
-- **confirm_operations:** `true` will prompt you for extra confirmation for applying labels in plex (If `add_label` is `true`) or adding to radarr (If `add_to_radarr` is `true`)
+- **show_imdb_link:** `true` will show an imdb link for each recommended movie.
+- **keep_logs:** The amount of logs to keep of your runs. set to `0` to disable logging.
 
-### Path Mappings
+### Paths
 - Can be used to path maps across systems.
 - Examples:
 ```yaml
@@ -108,30 +109,35 @@ paths:
     '/home/user/media': '/shared/media'
 ```
 
-### Plex Settings
+### Plex
+- **url:** Edit if needed.
+- **token:** [Finding your Plex Token](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/)
+- **library_title:** The title of your Movie Library
 - **add_label:** Adds label to the recommended Movies in your Plex library if set to `true`
 - **label_name:** The label to be used
-- **library_title:** The title of your Movie Library
 - **remove_previous_recommendations:** If set to `true` removes the label from previously recommendation runs. If set to `false' simply appends the new recommendations.
-- **token:** [Finding your Plex Token](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/)
-- **url:** Edit if needed.
 
-### Radarr Settings
-- **add_to_radarr:** Set to `true` if you want to add Trakt recommendations to Radarr. (Requires `plex_only:` `false`)
+### Radarr
+- **url:** Change if needed
 - **api_key:** Can be found in Radarr under Settings => General => Security
+- **root_folder:** Change to your Movies root folder
+- **add_to_radarr:** Set to `true` if you want to add Trakt recommendations to Radarr. (Requires `plex_only:` `false`)
 - **monitor:** `true` will add movies as monitored and trigger a search. `false` will add them unmonitored without searching.
 - **quality_profile:** Name of the quality profile to be used when adding movies
 - **radarr_tag:** Add a Radarr tag to added movies
-- **root_folder:** Change to your Movies root folder
-- **url:** Change if needed
  
-### Trakt Settings
+### Trakt
 - Your Trakt API credentials can be found in Trakt under settings => [Your Trakt Apps](https://trakt.tv/oauth/applications) [More info here](https://trakt.docs.apiary.io/#)
 - **sync_watch_history:** Can be set to `false` if you already build your Trakt watch history another way (e.g.: through Trakt's Plex Scrobbler).
 
 ### TMDB Settings
 - **use_TMDB_keywords:** `true` uses TMDB (plot)keywords for matching (Recommended). In this case an api_key is required.
 - **api_key:** [How to get a TMDB API Key](https://developer.themoviedb.org/docs/getting-started)
+
+### Weights
+Here you can change the 'weight' or 'importance' some parameters have.</br>
+Make sure the sum of the weights adds up to 1.</br>
+Plex User Ratings, if you use them, automatically apply soft multipliers to scores.
 
 ---
 
