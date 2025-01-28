@@ -32,8 +32,6 @@ radarr:
   quality_profile: HD-1080p
   radarr_tag: RecommendedForPlex
 
-
-
 trakt:
   client_id: YOUR_TRAKT_CLIENT_ID
   client_secret: YOUR_TRAKT_SECRET

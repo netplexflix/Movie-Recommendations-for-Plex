@@ -13,7 +13,7 @@ import json
 from urllib.parse import quote
 import re
 
-__version__ = "2.3"
+__version__ = "2.4"
 REPO_URL = "https://github.com/netplexflix/Movie-Recommendations-for-Plex"
 API_VERSION_URL = f"https://api.github.com/repos/netplexflix/Movie-Recommendations-for-Plex/releases/latest"
 
@@ -1112,8 +1112,6 @@ class PlexMovieRecommender:
 
             radarr_url = self.radarr_config['url'].rstrip('/')
             if '/api/' not in radarr_url:
-                if '/radarr' not in radarr_url:
-                    radarr_url += '/radarr'
                 radarr_url += '/api/v3'
 
             headers = {
