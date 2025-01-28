@@ -13,7 +13,7 @@ import json
 from urllib.parse import quote
 import re
 
-__version__ = "2.2"
+__version__ = "2.3"
 REPO_URL = "https://github.com/netplexflix/Movie-Recommendations-for-Plex"
 API_VERSION_URL = f"https://api.github.com/repos/netplexflix/Movie-Recommendations-for-Plex/releases/latest"
 
@@ -134,21 +134,17 @@ class PlexMovieRecommender:
 
         self.cache_dir = os.path.join(os.path.dirname(__file__), "cache")
         os.makedirs(self.cache_dir, exist_ok=True)
-        self.cache_path = os.path.join(self.cache_dir, "watched_data_cache.json")
-
-        (self.cached_watched_count,
-         self.watched_data_counters,
-         self.plex_tmdb_cache,
-         self.tmdb_keywords_cache,
-         self.cached_library_movie_count,
-         self.cached_unwatched_count,
-         self.cached_unwatched_movies) = self._load_cache()
-
+        
+        self.watched_cache_path = os.path.join(self.cache_dir, "watched_data_cache.json")
+        self.unwatched_cache_path = os.path.join(self.cache_dir, "unwatched_data_cache.json")
+        
+        self.cached_watched_count, self.watched_data_counters, self.plex_tmdb_cache, self.tmdb_keywords_cache = self._load_watched_cache()
+        self.cached_library_movie_count, self.cached_unwatched_count, self.cached_unwatched_movies = self._load_unwatched_cache()
+        
         if self.plex_tmdb_cache is None:
             self.plex_tmdb_cache = {}
         if self.tmdb_keywords_cache is None:
             self.tmdb_keywords_cache = {}
-        
         if not hasattr(self, 'synced_trakt_history'):
             self.synced_trakt_history = {}
 
@@ -160,8 +156,9 @@ class PlexMovieRecommender:
             self.watched_data = self._get_watched_movies_data()
             self.watched_data_counters = self.watched_data
             self.cached_watched_count = current_watched_count
+            self._save_watched_cache()
         else:
-            print("Watched count unchanged. Using cached watched data for faster performance.\n")
+            print("Watched count unchanged. Using cached data for faster performance.\n")
             self.watched_data = self.watched_data_counters
 
         print("Fetching library metadata (for existing movie checks)...")
@@ -194,7 +191,7 @@ class PlexMovieRecommender:
         try:
             response = requests.post(
                 'https://api.trakt.tv/oauth/device/code',
-                headers=self.trakt_headers,
+                headers={'Content-Type': 'application/json'},
                 json={'client_id': self.config['trakt']['client_id']}
             )
             
@@ -216,7 +213,7 @@ class PlexMovieRecommender:
                     time.sleep(poll_interval)
                     token_response = requests.post(
                         'https://api.trakt.tv/oauth/device/token',
-                        headers=self.trakt_headers,
+                        headers={'Content-Type': 'application/json'},
                         json={
                             'code': device_code,
                             'client_id': self.config['trakt']['client_id'],
@@ -246,46 +243,78 @@ class PlexMovieRecommender:
     # ------------------------------------------------------------------------
     # CACHING LOGIC
     # ------------------------------------------------------------------------
-    def _load_cache(self):
-        if not os.path.exists(self.cache_path):
+    def _load_watched_cache(self):
+        if not os.path.exists(self.watched_cache_path):
             self.synced_trakt_history = {}
-            return None, None, None, None, None, None, []
+            return 0, {}, {}, {}
         try:
-            with open(self.cache_path, 'r', encoding='utf-8') as f:
+            with open(self.watched_cache_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
+            # Example Integrity Check
+            assert isinstance(data.get('watched_count', 0), int)
+            assert isinstance(data.get('watched_data_counters', {}), dict)
         except Exception as e:
-            print(f"{YELLOW}Error loading cache: {e}{RESET}")
+            print(f"{YELLOW}Error loading watched cache: {e}{RESET}")
             self.synced_trakt_history = {}
-            return None, None, None, None, None, None, []
-
+            return 0, {}, {}, {}
+        
         self.synced_trakt_history = data.get('synced_trakt_history', {})
+        return (
+            data.get('watched_count', 0),
+            data.get('watched_data_counters', {}),
+            data.get('plex_tmdb_cache', {}),
+            data.get('tmdb_keywords_cache', {})
+        )
+    
+    def _load_unwatched_cache(self):
+        if not os.path.exists(self.unwatched_cache_path):
+            return 0, 0, []
+        try:
+            with open(self.unwatched_cache_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            # Example Integrity Check
+            assert isinstance(data.get('library_movie_count', 0), int)
+            assert isinstance(data.get('unwatched_count', 0), int)
+            assert isinstance(data.get('unwatched_movie_details', []), list)
+        except Exception as e:
+            print(f"{YELLOW}Error loading unwatched cache: {e}{RESET}")
+            return 0, 0, []
         
         return (
-            data.get('watched_count'),
-            data.get('watched_data_counters'),
-            data.get('plex_tmdb_cache'),
-            data.get('tmdb_keywords_cache'),
-            data.get('library_movie_count'),
-            data.get('unwatched_count'),
+            data.get('library_movie_count', 0),
+            data.get('unwatched_count', 0),
             data.get('unwatched_movie_details', [])
         )
     
-    def _save_cache(self):
+    def _save_watched_cache(self):
         data = {
             'watched_count': self.cached_watched_count,
             'watched_data_counters': self.watched_data_counters,
             'plex_tmdb_cache': self.plex_tmdb_cache,
             'tmdb_keywords_cache': self.tmdb_keywords_cache,
-            'library_movie_count': self.cached_library_movie_count,
-            'unwatched_count': self.cached_unwatched_count,
-            'unwatched_movie_details': self.cached_unwatched_movies,
             'synced_trakt_history': self.synced_trakt_history
         }
         try:
-            with open(self.cache_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f)
+            with open(self.watched_cache_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=4)
         except Exception as e:
-            print(f"{YELLOW}Error saving cache: {e}{RESET}")
+            print(f"{YELLOW}Error saving watched cache: {e}{RESET}")
+    
+    def _save_unwatched_cache(self):
+        data = {
+            'library_movie_count': self.cached_library_movie_count,
+            'unwatched_count': self.cached_unwatched_count,
+            'unwatched_movie_details': self.cached_unwatched_movies
+        }
+        try:
+            with open(self.unwatched_cache_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=4)
+        except Exception as e:
+            print(f"{YELLOW}Error saving unwatched cache: {e}{RESET}")
+    
+    def _save_cache(self):
+        self._save_watched_cache()
+        self._save_unwatched_cache()
 
     def _get_watched_count(self) -> int:
         try:
@@ -686,7 +715,7 @@ class PlexMovieRecommender:
                 ascore *= (3 / matched_actors)
             if matched_actors > 0:
                 ascore /= matched_actors
-            score += ascore * weights.get('actor_weight', 0.15)
+            score += ascore * weights.get('actor_weight', 0.20)
 
         if hasattr(movie, 'media') and self.show_language:
             try:
@@ -797,10 +826,10 @@ class PlexMovieRecommender:
         current_all_count = len(current_all)
         current_unwatched = movies_section.search(unwatched=True)
         current_unwatched_count = len(current_unwatched)
-
+    
         if (current_all_count == self.cached_library_movie_count and
             current_unwatched_count == self.cached_unwatched_count):
-            print(f"No change in Plex library or unwatched count. Using cached unwatched data.")
+            print(f"Unwatched count unchanged. Using cached data for faster performance.")
             return self.cached_unwatched_movies
 
         unwatched_details = []
@@ -817,6 +846,7 @@ class PlexMovieRecommender:
         self.cached_library_movie_count = current_all_count
         self.cached_unwatched_count = current_unwatched_count
         self.cached_unwatched_movies = unwatched_details
+        self._save_unwatched_cache()
         return unwatched_details
 
     def get_trakt_recommendations(self) -> List[Dict]:
@@ -1267,7 +1297,7 @@ class TeeLogger:
         sys.__stdout__.write(text)
         stripped = ANSI_PATTERN.sub('', text)
         self.logfile.write(stripped)
-
+    
     def flush(self):
         sys.__stdout__.flush()
         self.logfile.flush()
