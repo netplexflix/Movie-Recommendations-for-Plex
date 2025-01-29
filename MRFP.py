@@ -13,7 +13,7 @@ import json
 from urllib.parse import quote
 import re
 
-__version__ = "2.4"
+__version__ = "2.5"
 REPO_URL = "https://github.com/netplexflix/Movie-Recommendations-for-Plex"
 API_VERSION_URL = f"https://api.github.com/repos/netplexflix/Movie-Recommendations-for-Plex/releases/latest"
 
@@ -250,7 +250,6 @@ class PlexMovieRecommender:
         try:
             with open(self.watched_cache_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            # Example Integrity Check
             assert isinstance(data.get('watched_count', 0), int)
             assert isinstance(data.get('watched_data_counters', {}), dict)
         except Exception as e:
@@ -272,7 +271,6 @@ class PlexMovieRecommender:
         try:
             with open(self.unwatched_cache_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            # Example Integrity Check
             assert isinstance(data.get('library_movie_count', 0), int)
             assert isinstance(data.get('unwatched_count', 0), int)
             assert isinstance(data.get('unwatched_movie_details', []), list)
@@ -831,18 +829,17 @@ class PlexMovieRecommender:
             current_unwatched_count == self.cached_unwatched_count):
             print(f"Unwatched count unchanged. Using cached data for faster performance.")
             return self.cached_unwatched_movies
-
+    
         unwatched_details = []
         for i, movie in enumerate(current_unwatched, start=1):
             self._show_progress("Scanning unwatched", i, current_unwatched_count)
             info = self.get_movie_details(movie)
-            if any(g in self.exclude_genres for g in info['genres']):
-                continue
+            
             unwatched_details.append(info)
         print()
-
+    
         print(f"Found {len(unwatched_details)} unwatched movies matching your criteria.\n")
-
+    
         self.cached_library_movie_count = current_all_count
         self.cached_unwatched_count = current_unwatched_count
         self.cached_unwatched_movies = unwatched_details
@@ -853,99 +850,118 @@ class PlexMovieRecommender:
         print(f"{YELLOW}Fetching recommendations from Trakt...{RESET}")
         try:
             url = "https://api.trakt.tv/recommendations/movies"
-            response = requests.get(
-                url,
-                headers=self.trakt_headers,
-                params={
-                    'limit': self.limit_trakt_results * 4,
-                    'extended': 'full'
-                }
-            )
-            
-            if response.status_code == 200:
-                movies = response.json()
-                for m in movies:
-                    base_rating = float(m.get('rating', 0.0))
-                    m['_randomized_rating'] = base_rating + random.uniform(0, 0.5)
-
-                movies.sort(key=lambda x: x['_randomized_rating'], reverse=True)
-
-                recs = []
-                for movie in movies:
-                    if self._is_movie_in_library(movie['title'], movie.get('year')):
-                        continue
-
-                    ratings = {
-                        'imdb_rating': round(float(movie.get('rating', 0)), 1),
-                        'votes': movie.get('votes', 0)
+            collected_recs = []
+            page = 1
+            per_page = 100  # Trakt's maximum allowed per page
+    
+            while len(collected_recs) < self.limit_trakt_results:
+                response = requests.get(
+                    url,
+                    headers=self.trakt_headers,
+                    params={
+                        'limit': per_page,
+                        'page': page,
+                        'extended': 'full'
                     }
-                    md = {
-                        'title': movie['title'],
-                        'year': movie['year'],
-                        'ratings': ratings,
-                        'summary': movie.get('overview', ''),
-                        'genres': [g.lower() for g in movie.get('genres', [])],
-                        'cast': [],
-                        'director': "N/A",
-                        'language': "N/A",
-                        'imdb_id': movie['ids'].get('imdb') if 'ids' in movie else None
-                    }
-
-                    if any(g in self.exclude_genres for g in md['genres']):
-                        continue
-
-                    tmdb_id = None
-                    if 'ids' in movie and isinstance(movie['ids'], dict):
-                        tmdb_id = movie['ids'].get('tmdb')
-
-                    if tmdb_id and self.tmdb_api_key:
-                        if self.show_language:
-                            try:
-                                resp_lang = requests.get(
-                                    f"https://api.themoviedb.org/3/movie/{tmdb_id}",
-                                    params={'api_key': self.tmdb_api_key}
-                                )
-                                resp_lang.raise_for_status()
-                                d = resp_lang.json()
-                                if 'original_language' in d:
-                                    md['language'] = get_full_language_name(d['original_language'])
-                            except:
-                                pass
-
-                        if self.show_cast or self.show_director:
-                            try:
-                                resp_credits = requests.get(
-                                    f"https://api.themoviedb.org/3/movie/{tmdb_id}/credits",
-                                    params={'api_key': self.tmdb_api_key}
-                                )
-                                resp_credits.raise_for_status()
-                                c_data = resp_credits.json()
-
-                                if self.show_cast and 'cast' in c_data:
-                                    c_sorted = c_data['cast'][:3]
-                                    md['cast'] = [c['name'] for c in c_sorted]
-
-                                if self.show_director and 'crew' in c_data:
-                                    directors = [p for p in c_data['crew'] if p.get('job') == 'Director']
-                                    if directors:
-                                        md['director'] = directors[0]['name']
-                            except:
-                                pass
-
-                    recs.append(md)
-                
-                half_cut = max(int(len(recs) * 0.5), 1)
-                top_half = recs[:half_cut]
-                top_half.sort(key=lambda x: x.get('ratings', {}).get('imdb_rating', 0), reverse=True)
-                random.shuffle(top_half)
-                final_recs = top_half[:min(self.limit_trakt_results, len(top_half))]
-                return final_recs
-            else:
-                print(f"{RED}Error getting Trakt recommendations: {response.status_code}{RESET}")
-                if response.status_code == 401:
-                    print(f"{YELLOW}Try re-authenticating with Trakt{RESET}")
-                    self._authenticate_trakt()
-                return []
+                )
+    
+                if response.status_code == 200:
+                    movies = response.json()
+                    if not movies:
+                        break
+    
+                    for m in movies:
+                        if len(collected_recs) >= self.limit_trakt_results:
+                            break
+    
+                        base_rating = float(m.get('rating', 0.0))
+                        m['_randomized_rating'] = base_rating + random.uniform(0, 0.5)
+    
+                    movies.sort(key=lambda x: x['_randomized_rating'], reverse=True)
+    
+                    for movie in movies:
+                        if len(collected_recs) >= self.limit_trakt_results:
+                            break
+    
+                        if self._is_movie_in_library(movie['title'], movie.get('year')):
+                            continue
+    
+                        ratings = {
+                            'imdb_rating': round(float(movie.get('rating', 0)), 1),
+                            'votes': movie.get('votes', 0)
+                        }
+                        md = {
+                            'title': movie['title'],
+                            'year': movie['year'],
+                            'ratings': ratings,
+                            'summary': movie.get('overview', ''),
+                            'genres': [g.lower() for g in movie.get('genres', [])],
+                            'cast': [],
+                            'director': "N/A",
+                            'language': "N/A",
+                            'imdb_id': movie['ids'].get('imdb') if 'ids' in movie else None
+                        }
+    
+                        if any(g in self.exclude_genres for g in md['genres']):
+                            continue
+    
+                        tmdb_id = None
+                        if 'ids' in movie and isinstance(movie['ids'], dict):
+                            tmdb_id = movie['ids'].get('tmdb')
+    
+                        if tmdb_id and self.tmdb_api_key:
+                            if self.show_language:
+                                try:
+                                    resp_lang = requests.get(
+                                        f"https://api.themoviedb.org/3/movie/{tmdb_id}",
+                                        params={'api_key': self.tmdb_api_key}
+                                    )
+                                    resp_lang.raise_for_status()
+                                    d = resp_lang.json()
+                                    if 'original_language' in d:
+                                        md['language'] = get_full_language_name(d['original_language'])
+                                except:
+                                    pass
+    
+                            if self.show_cast or self.show_director:
+                                try:
+                                    resp_credits = requests.get(
+                                        f"https://api.themoviedb.org/3/movie/{tmdb_id}/credits",
+                                        params={'api_key': self.tmdb_api_key}
+                                    )
+                                    resp_credits.raise_for_status()
+                                    c_data = resp_credits.json()
+    
+                                    if self.show_cast and 'cast' in c_data:
+                                        c_sorted = c_data['cast'][:3]
+                                        md['cast'] = [c['name'] for c in c_sorted]
+    
+                                    if self.show_director and 'crew' in c_data:
+                                        directors = [p for p in c_data['crew'] if p.get('job') == 'Director']
+                                        if directors:
+                                            md['director'] = directors[0]['name']
+                                except:
+                                    pass
+    
+                        collected_recs.append(md)
+    
+                    if len(movies) < per_page:
+                        break
+    
+                    page += 1
+                else:
+                    print(f"{RED}Error getting Trakt recommendations: {response.status_code}{RESET}")
+                    if response.status_code == 401:
+                        print(f"{YELLOW}Try re-authenticating with Trakt{RESET}")
+                        self._authenticate_trakt()
+                    break
+    
+            collected_recs.sort(key=lambda x: x.get('ratings', {}).get('imdb_rating', 0), reverse=True)
+            random.shuffle(collected_recs)
+            final_recs = collected_recs[:self.limit_trakt_results]
+            print(f"Collected {len(final_recs)} Trakt recommendations after exclusions.")
+            return final_recs
+    
         except Exception as e:
             print(f"{RED}Error getting Trakt recommendations: {e}{RESET}")
             return []
@@ -954,34 +970,44 @@ class PlexMovieRecommender:
         if self.sync_watch_history:
             self._sync_plex_watched_to_trakt()
             self._save_cache()
-
+    
         plex_recs = self.get_unwatched_library_movies()
         if plex_recs:
-            plex_recs.sort(
-                key=lambda x: (
-                    x.get('ratings', {}).get('imdb_rating', 0),
-                    x.get('similarity_score', 0)
-                ),
-                reverse=True
-            )
-            top_count = max(int(len(plex_recs) * 0.5), self.limit_plex_results)
-            top_by_rating = plex_recs[:top_count]
-
-            top_by_rating.sort(key=lambda x: x.get('similarity_score', 0), reverse=True)
-            final_count = max(int(len(top_by_rating) * 0.3), self.limit_plex_results)
-            final_pool = top_by_rating[:final_count]
-
-            if final_pool:
-                plex_recs = random.sample(final_pool, min(self.limit_plex_results, len(final_pool)))
-            else:
+            excluded_recs = [m for m in plex_recs if any(g in self.exclude_genres for g in m['genres'])]
+            included_recs = [m for m in plex_recs if not any(g in self.exclude_genres for g in m['genres'])]
+    
+            print(f"Excluded {len(excluded_recs)} movies based on excluded genres.")
+    
+            if not included_recs:
+                print(f"{YELLOW}No unwatched movies left after applying genre exclusions.{RESET}")
                 plex_recs = []
+            else:
+                plex_recs = included_recs
+                plex_recs.sort(
+                    key=lambda x: (
+                        x.get('ratings', {}).get('imdb_rating', 0),
+                        x.get('similarity_score', 0)
+                    ),
+                    reverse=True
+                )
+                top_count = max(int(len(plex_recs) * 0.5), self.limit_plex_results)
+                top_by_rating = plex_recs[:top_count]
+    
+                top_by_rating.sort(key=lambda x: x.get('similarity_score', 0), reverse=True)
+                final_count = max(int(len(top_by_rating) * 0.3), self.limit_plex_results)
+                final_pool = top_by_rating[:final_count]
+    
+                if final_pool:
+                    plex_recs = random.sample(final_pool, min(self.limit_plex_results, len(final_pool)))
+                else:
+                    plex_recs = []
         else:
             plex_recs = []
-
+    
         trakt_recs = []
         if not self.plex_only:
             trakt_recs = self.get_trakt_recommendations()
-
+    
         print(f"\nRecommendation process completed!")
         return {
             'plex_recommendations': plex_recs,
