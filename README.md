@@ -139,9 +139,18 @@ paths:
 - **api_key:** [How to get a TMDB API Key](https://developer.themoviedb.org/docs/getting-started)
 
 ### Weights
-Here you can change the 'weight' or 'importance' some parameters have.</br>
-Make sure the sum of the weights adds up to 1.</br>
-Plex User Ratings, if you use them, automatically apply soft multipliers to scores.
+- Here you can change the 'weight' or 'importance' some parameters have. Make sure the sum of the weights adds up to 1.
+- **userRating_multipliers:** `true` uses your user ratings, if available, to scale the impact.
+
+> [!NOTE]  
+> **Example:** </br>
+> Without **userRating_multipliers** if you watch a lot of movies by Director X, the algorithm will assume you enjoy watching their movies and will score 'Director X' highly.</br>
+> However it is theoretically possible that you rated all of their movies really poorly (e.g; 1 star)</br>
+> meaning that even though you watched a lot of movies directed by Director X, you don't like them.</br>
+> Enabling **userRating_multipliers** will take this into account and will make sure that in this example, Movies by Director X will will have a much lower similarity score.</br>
+> The opposite is also true; If you watched only 2 movies by director Y but you rated both really high, then their movies will have a higher similarity score.</br>
+> Movies without UserRating are not affected.
+
 
 ---
 
