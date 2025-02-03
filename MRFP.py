@@ -12,8 +12,9 @@ import random
 import json
 from urllib.parse import quote
 import re
+from datetime import datetime, timezone, timedelta
 
-__version__ = "2.5"
+__version__ = "2.6"
 REPO_URL = "https://github.com/netplexflix/Movie-Recommendations-for-Plex"
 API_VERSION_URL = f"https://api.github.com/repos/netplexflix/Movie-Recommendations-for-Plex/releases/latest"
 
@@ -80,12 +81,21 @@ def check_version():
 
 class PlexMovieRecommender:
     def __init__(self, config_path: str):
+        self.cached_watched_count = 0
+        self.cached_unwatched_count = 0
+        self.cached_library_movie_count = 0
+        self.watched_data_counters = {}
+        self.cached_unwatched_movies = []
+        self.plex_tmdb_cache = {}
+        self.tmdb_keywords_cache = {}
+
         print("Initializing recommendation system...")
         self.config = self._load_config(config_path)
         
         print("Connecting to Plex server...")
         self.plex = self._init_plex()
         print(f"Connected to Plex successfully!\n")
+        print(f"{YELLOW}Checking Cache...{RESET}")
         
         general_config = self.config.get('general', {})
         self.confirm_operations = general_config.get('confirm_operations', False)
@@ -138,9 +148,29 @@ class PlexMovieRecommender:
         self.watched_cache_path = os.path.join(self.cache_dir, "watched_data_cache.json")
         self.unwatched_cache_path = os.path.join(self.cache_dir, "unwatched_data_cache.json")
         
-        self.cached_watched_count, self.watched_data_counters, self.plex_tmdb_cache, self.tmdb_keywords_cache = self._load_watched_cache()
-        self.cached_library_movie_count, self.cached_unwatched_count, self.cached_unwatched_movies = self._load_unwatched_cache()
-        
+        # Load watched cache
+        if os.path.exists(self.watched_cache_path):
+            try:
+                with open(self.watched_cache_path, 'r', encoding='utf-8') as f:
+                    watched_cache = json.load(f)
+                    self.cached_watched_count = watched_cache.get('watched_count', 0)
+                    self.watched_data_counters = watched_cache.get('watched_data_counters', {})
+                    self.plex_tmdb_cache = watched_cache.get('plex_tmdb_cache', {})
+                    self.tmdb_keywords_cache = watched_cache.get('tmdb_keywords_cache', {})
+            except Exception as e:
+                print(f"{YELLOW}Error loading watched cache: {e}{RESET}")
+    
+        # Load unwatched cache
+        if os.path.exists(self.unwatched_cache_path):
+            try:
+                with open(self.unwatched_cache_path, 'r', encoding='utf-8') as f:
+                    unwatched_cache = json.load(f)
+                    self.cached_library_movie_count = unwatched_cache.get('library_movie_count', 0)
+                    self.cached_unwatched_count = unwatched_cache.get('unwatched_count', 0)
+                    self.cached_unwatched_movies = unwatched_cache.get('unwatched_movie_details', [])
+            except Exception as e:
+                print(f"{YELLOW}Error loading unwatched cache: {e}{RESET}") 
+				
         if self.plex_tmdb_cache is None:
             self.plex_tmdb_cache = {}
         if self.tmdb_keywords_cache is None:
@@ -148,7 +178,7 @@ class PlexMovieRecommender:
         if not hasattr(self, 'synced_trakt_history'):
             self.synced_trakt_history = {}
 
-        self.library_title = self.config['plex'].get('library_title', 'Movies')
+        self.library_title = self.config['plex'].get('movie_library_title', 'Movies')
 
         current_watched_count = self._get_watched_count()
         if current_watched_count != self.cached_watched_count:
@@ -242,71 +272,31 @@ class PlexMovieRecommender:
 
     # ------------------------------------------------------------------------
     # CACHING LOGIC
-    # ------------------------------------------------------------------------
-    def _load_watched_cache(self):
-        if not os.path.exists(self.watched_cache_path):
-            self.synced_trakt_history = {}
-            return 0, {}, {}, {}
-        try:
-            with open(self.watched_cache_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            assert isinstance(data.get('watched_count', 0), int)
-            assert isinstance(data.get('watched_data_counters', {}), dict)
-        except Exception as e:
-            print(f"{YELLOW}Error loading watched cache: {e}{RESET}")
-            self.synced_trakt_history = {}
-            return 0, {}, {}, {}
-        
-        self.synced_trakt_history = data.get('synced_trakt_history', {})
-        return (
-            data.get('watched_count', 0),
-            data.get('watched_data_counters', {}),
-            data.get('plex_tmdb_cache', {}),
-            data.get('tmdb_keywords_cache', {})
-        )
-    
-    def _load_unwatched_cache(self):
-        if not os.path.exists(self.unwatched_cache_path):
-            return 0, 0, []
-        try:
-            with open(self.unwatched_cache_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            assert isinstance(data.get('library_movie_count', 0), int)
-            assert isinstance(data.get('unwatched_count', 0), int)
-            assert isinstance(data.get('unwatched_movie_details', []), list)
-        except Exception as e:
-            print(f"{YELLOW}Error loading unwatched cache: {e}{RESET}")
-            return 0, 0, []
-        
-        return (
-            data.get('library_movie_count', 0),
-            data.get('unwatched_count', 0),
-            data.get('unwatched_movie_details', [])
-        )
-    
+    # ------------------------------------------------------------------------ 
     def _save_watched_cache(self):
-        data = {
-            'watched_count': self.cached_watched_count,
-            'watched_data_counters': self.watched_data_counters,
-            'plex_tmdb_cache': self.plex_tmdb_cache,
-            'tmdb_keywords_cache': self.tmdb_keywords_cache,
-            'synced_trakt_history': self.synced_trakt_history
-        }
         try:
+            cache_data = {
+                'watched_count': self.cached_watched_count,
+                'watched_data_counters': self.watched_data_counters,
+                'plex_tmdb_cache': self.plex_tmdb_cache,
+                'tmdb_keywords_cache': self.tmdb_keywords_cache,
+                'last_updated': datetime.now().isoformat()
+            }
             with open(self.watched_cache_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=4)
+                json.dump(cache_data, f, indent=4)
         except Exception as e:
             print(f"{YELLOW}Error saving watched cache: {e}{RESET}")
     
     def _save_unwatched_cache(self):
-        data = {
-            'library_movie_count': self.cached_library_movie_count,
-            'unwatched_count': self.cached_unwatched_count,
-            'unwatched_movie_details': self.cached_unwatched_movies
-        }
         try:
+            cache_data = {
+                'library_movie_count': self.cached_library_movie_count,
+                'unwatched_count': self.cached_unwatched_count,
+                'unwatched_movie_details': self.cached_unwatched_movies,
+                'last_updated': datetime.now().isoformat()
+            }
             with open(self.unwatched_cache_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=4)
+                json.dump(cache_data, f, indent=4)
         except Exception as e:
             print(f"{YELLOW}Error saving unwatched cache: {e}{RESET}")
     
@@ -365,6 +355,213 @@ class PlexMovieRecommender:
     def _is_movie_in_library(self, title: str, year: Optional[int]) -> bool:
         return (title.lower(), year) in self.library_movies
 
+    def _get_movie_language(self, movie) -> str:
+        try:
+            if hasattr(movie, 'media') and movie.media:
+                media = movie.media[0]
+                if hasattr(media, 'parts') and media.parts:
+                    part = media.parts[0]
+                    languages = set()
+                    for stream in part.audioStreams():
+                        lang_code = (
+                            getattr(stream, 'languageTag', None) or
+                            getattr(stream, 'languageCode', None) or
+                            getattr(stream, 'language', None)
+                        )
+                        if lang_code:
+                            full_name = get_full_language_name(lang_code)
+                            if full_name != lang_code:
+                                languages.add(full_name)
+                    if languages:
+                        return list(languages)[0]
+        except Exception as e:
+            print(f"{YELLOW}Error getting language for {movie.title}: {e}{RESET}")
+        return 'N/A'
+
+    def _extract_genres(self, movie) -> List[str]:
+        try:
+            if hasattr(movie, 'genres') and movie.genres:
+                return [g.tag.lower() for g in movie.genres]
+        except Exception as e:
+            print(f"{YELLOW}Error extracting genres for {movie.title}: {e}{RESET}")
+        return []
+
+    def get_movie_details(self, movie) -> Dict:
+        try:
+            movie.reload()
+            
+            # Get IMDb ID and TMDB keywords
+            imdb_id = None
+            tmdb_keywords = []
+            
+            if hasattr(movie, 'guids'):
+                for guid in movie.guids:
+                    if 'imdb://' in guid.id:
+                        imdb_id = guid.id.replace('imdb://', '')
+                        break
+                        
+            # Get TMDB keywords if enabled
+            if self.use_tmdb_keywords and self.tmdb_api_key:
+                tmdb_id = self._get_plex_movie_tmdb_id(movie)
+                if tmdb_id:
+                    tmdb_keywords = list(self._get_tmdb_keywords_for_id(tmdb_id))
+            
+            # Get cast and director
+            cast_list = []
+            director_name = None
+            if hasattr(movie, 'roles'):
+                cast_list = [r.tag for r in movie.roles[:3]]
+            if hasattr(movie, 'directors') and movie.directors:
+                director_name = movie.directors[0].tag
+                
+            # Get all audio languages
+            languages = set()
+            if hasattr(movie, 'media') and movie.media:
+                media = movie.media[0]
+                if hasattr(media, 'parts') and media.parts:
+                    part = media.parts[0]
+                    for stream in part.audioStreams():
+                        lang_code = (
+                            getattr(stream, 'languageTag', None) or
+                            getattr(stream, 'languageCode', None) or
+                            getattr(stream, 'language', None)
+                        )
+                        if lang_code:
+                            full_name = get_full_language_name(lang_code)
+                            if full_name != lang_code:
+                                languages.add(full_name)
+            
+            language = list(languages)[0] if languages else 'N/A'
+            
+            # Get ratings
+            ratings = {}
+            if hasattr(movie, 'rating'):
+                ratings['imdb'] = round(float(movie.rating), 1) if movie.rating else 0
+                
+            return {
+                'title': movie.title,
+                'year': getattr(movie, 'year', None),
+                'genres': [g.tag.lower() for g in movie.genres] if hasattr(movie, 'genres') else [],
+                'summary': getattr(movie, 'summary', ''),
+                'imdb_id': imdb_id,
+                'tmdb_keywords': tmdb_keywords,
+                'cast': cast_list,
+                'director': director_name,
+                'language': language,
+                'ratings': ratings
+            }
+                
+        except Exception as e:
+            print(f"{YELLOW}Error getting movie details for {movie.title}: {e}{RESET}")
+            return {}
+
+    def _get_watched_movies_data(self) -> Dict:
+        movies_section = self.plex.library.section(self.library_title)
+        all_movies = movies_section.search(unwatched=False)
+        total_watched = len(all_movies)
+        
+        print(f"Processing {total_watched} watched movies...")
+        
+        genre_counter = Counter()
+        director_counter = Counter()
+        actor_counter = Counter()
+        language_counter = Counter()
+        tmdb_keyword_counter = Counter()
+        
+        for i, movie in enumerate(all_movies, 1):
+            self._show_progress("Analyzing watched movies", i, total_watched)
+            
+            try:
+                movie.reload()
+                
+                # Get movie genres
+                if hasattr(movie, 'genres') and movie.genres:
+                    for genre in movie.genres:
+                        genre_counter[genre.tag.lower()] += 1
+                
+                # Get director
+                if hasattr(movie, 'directors') and movie.directors:
+                    director_counter[movie.directors[0].tag] += 1
+                    
+                # Get actors (top 3)
+                if hasattr(movie, 'roles'):
+                    for role in movie.roles[:3]:
+                        actor_counter[role.tag] += 1
+                        
+                # Get languages
+                if hasattr(movie, 'media') and movie.media:
+                    media = movie.media[0]
+                    if hasattr(media, 'parts') and media.parts:
+                        part = media.parts[0]
+                        languages = set()
+                        for stream in part.audioStreams():
+                            lang_code = (
+                                getattr(stream, 'languageTag', None) or
+                                getattr(stream, 'languageCode', None) or
+                                getattr(stream, 'language', None)
+                            )
+                            if lang_code:
+                                full_name = get_full_language_name(lang_code)
+                                if full_name != lang_code:
+                                    languages.add(full_name)
+                                    language_counter[full_name] += 1
+                        
+                # Get TMDB keywords
+                if self.use_tmdb_keywords and self.tmdb_api_key:
+                    tmdb_id = self._get_plex_movie_tmdb_id(movie)
+                    if tmdb_id:
+                        movie_keywords = self._get_tmdb_keywords_for_id(tmdb_id)
+                        for keyword in movie_keywords:
+                            tmdb_keyword_counter[keyword] += 1
+                            
+            except Exception as e:
+                print(f"\nError processing {movie.title}: {e}")
+                continue
+    
+        # Calculate percentages
+        max_genre = max(genre_counter.values()) if genre_counter else 1
+        max_director = max(director_counter.values()) if director_counter else 1
+        max_actor = max(actor_counter.values()) if actor_counter else 1
+        max_language = max(language_counter.values()) if language_counter else 1
+        max_keyword = max(tmdb_keyword_counter.values()) if tmdb_keyword_counter else 1
+        
+        return {
+            'genres': {k: v/max_genre for k, v in genre_counter.items()},
+            'directors': {k: v/max_director for k, v in director_counter.items()},
+            'actors': {k: v/max_actor for k, v in actor_counter.items()},
+            'languages': {k: v/max_language for k, v in language_counter.items()},
+            'tmdb_keywords': {k: v/max_keyword for k, v in tmdb_keyword_counter.items()}
+        }
+
+    def get_unwatched_library_movies(self) -> List[Dict]:
+        print(f"\n{YELLOW}Fetching unwatched movies from Plex library...{RESET}")
+        movies_section = self.plex.library.section(self.library_title)
+        
+        current_all = movies_section.all()
+        current_all_count = len(current_all)
+        current_unwatched = movies_section.search(unwatched=True)
+        current_unwatched_count = len(current_unwatched)
+    
+        if (current_all_count == self.cached_library_movie_count and
+            current_unwatched_count == self.cached_unwatched_count):
+            print(f"Unwatched count unchanged. Using cached data for faster performance.")
+            return self.cached_unwatched_movies
+    
+        unwatched_details = []
+        for i, movie in enumerate(current_unwatched, start=1):
+            self._show_progress("Scanning unwatched", i, current_unwatched_count)
+            info = self.get_movie_details(movie)
+            
+            unwatched_details.append(info)
+        print()
+    
+        print(f"Found {len(unwatched_details)} unwatched movies matching your criteria.\n")
+    
+        self.cached_library_movie_count = current_all_count
+        self.cached_unwatched_count = current_unwatched_count
+        self.cached_unwatched_movies = unwatched_details
+        self._save_unwatched_cache()
+        return unwatched_details
     # ------------------------------------------------------------------------
     # TMDB HELPER METHODS
     # ------------------------------------------------------------------------
@@ -460,79 +657,6 @@ class PlexMovieRecommender:
         self.tmdb_keywords_cache[tmdb_id] = list(kw_set)
         return kw_set
 
-    def _get_watched_movies_data(self) -> Dict:
-        genre_counter = Counter()
-        director_counter = Counter()
-        actor_counter = Counter()
-        tmdb_keyword_counter = Counter()
-        language_counter = Counter()
-
-        try:
-            movies_section = self.plex.library.section(self.library_title)
-            watched_movies = movies_section.search(unwatched=False)
-            total_watched = len(watched_movies)
-
-            print(f"Found {total_watched} watched movies. Building frequency data...")
-            for i, movie in enumerate(watched_movies, start=1):
-                self._show_progress("Analyzing watched movies", i, total_watched)
-
-                user_rating = getattr(movie, 'userRating', None)
-                if user_rating is not None:
-                    rating_weight = float(user_rating) / 10.0
-                    rating_weight = min(max(rating_weight, 0.1), 1.0)
-                else:
-                    rating_weight = 0.5
-
-                if hasattr(movie, 'genres') and movie.genres:
-                    for g in movie.genres:
-                        genre_counter[g.tag.lower()] += rating_weight
-
-                if hasattr(movie, 'directors') and movie.directors:
-                    for d in movie.directors:
-                        director_counter[d.tag] += rating_weight
-
-                if hasattr(movie, 'roles') and movie.roles:
-                    for a in movie.roles:
-                        actor_counter[a.tag] += rating_weight
-
-                if self.show_language:
-                    try:
-                        media = movie.media[0]
-                        part = media.parts[0]
-                        audio_streams = part.audioStreams()
-                        if audio_streams:
-                            primary_audio = audio_streams[0]
-                            lang_code = (
-                                getattr(primary_audio, 'languageTag', None) or
-                                getattr(primary_audio, 'languageCode', None) or
-                                getattr(primary_audio, 'language', None)
-                            )
-                            if lang_code:
-                                language = get_full_language_name(lang_code)
-                                language_counter[language.lower()] += rating_weight
-                    except:
-                        pass
-
-                if self.use_tmdb_keywords and self.tmdb_api_key:
-                    tmdb_id = self._get_plex_movie_tmdb_id(movie)
-                    if tmdb_id:
-                        keywords = self._get_tmdb_keywords_for_id(tmdb_id)
-                        for kw in keywords:
-                            tmdb_keyword_counter[kw] += rating_weight
-
-            print()
-
-        except plexapi.exceptions.BadRequest as e:
-            print(f"{RED}Error gathering watched movies data: {e}{RESET}")
-
-        return {
-            'genres': dict(genre_counter),
-            'directors': dict(director_counter),
-            'actors': dict(actor_counter),
-            'tmdb_keywords': dict(tmdb_keyword_counter),
-            'languages': dict(language_counter)
-        }
-
     def _show_progress(self, prefix: str, current: int, total: int):
         pct = int((current / total) * 100)
         msg = f"\r{prefix}: {current}/{total} ({pct}%)"
@@ -542,129 +666,95 @@ class PlexMovieRecommender:
             sys.stdout.write("\n")
 
     # ------------------------------------------------------------------------
-    # TRAKT SYNC: BATCHED
+    # TRAKT SYNC
     # ------------------------------------------------------------------------
     def _sync_plex_watched_to_trakt(self):
         if not self.sync_watch_history:
             return
+    
+        print(f"{YELLOW}Checking Trakt sync status...{RESET}")
         
-        print(f"{YELLOW}Syncing Plex watch history to Trakt...{RESET}")
+        self.trakt_cache_path = os.path.join(self.cache_dir, "trakt_sync_cache.json")
+        synced_movie_ids = set()
+        
+        if os.path.exists(self.trakt_cache_path):
+            try:
+                with open(self.trakt_cache_path, 'r', encoding='utf-8') as f:
+                    cache_data = json.load(f)
+                    synced_movie_ids = set(cache_data.get('synced_movie_ids', []))
+            except Exception as e:
+                print(f"{YELLOW}Error loading Trakt cache: {e}{RESET}")
     
         movies_section = self.plex.library.section(self.library_title)
-        watched_movies = movies_section.search(unwatched=False)
-    
-        to_sync = []
-        total_watched = len(watched_movies)
-        skipped_synced = 0
-        for i, movie in enumerate(watched_movies, start=1):
-            self._show_progress("Building Trakt sync list", i, total_watched)
-
-            rk_str = str(movie.ratingKey)
-            if rk_str in self.synced_trakt_history:
-                skipped_synced += 1
-                continue
+        watched_movies = []
         
-            last_viewed = getattr(movie, 'lastViewedAt', None)
-            if not last_viewed:
-                continue
-
-            watched_at_iso = last_viewed.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-            title = movie.title
-            year = getattr(movie, 'year', None)
-            if not title:
-                continue
-
-            trakt_search_url = f"https://api.trakt.tv/search/movie?query={quote(title)}"
-            if year:
-                trakt_search_url += f"&years={year}"
-
-            try:
-                resp = requests.get(trakt_search_url, headers=self.trakt_headers)
-                resp.raise_for_status()
-                results = resp.json()
-                if not results:
-                    continue
-
-                trakt_movie = next(
-                    (r for r in results
-                     if r['movie']['title'].lower() == title.lower()
-                        and r['movie'].get('year') == year),
-                    results[0]
-                )
-                ids = trakt_movie['movie']['ids']
-                tmdb_id = ids.get('tmdb')
-                imdb_id = ids.get('imdb')
-                if not tmdb_id and not imdb_id:
-                    continue
-
-                entry = {"watched_at": watched_at_iso}
-                if tmdb_id:
-                    entry["ids"] = {"tmdb": tmdb_id}
-                else:
-                    entry["ids"] = {"imdb": imdb_id}
-
-                to_sync.append({
-                    "ratingKey": rk_str,
-                    "body": entry
-                })
-
-            except Exception as e:
-                print(f"{RED}Failed to lookup {title} on Trakt: {e}{RESET}")
-                continue
-
-        print()
-        if not to_sync:
-            print(f"No new Plex items to sync to Trakt.")
+        for movie in movies_section.search(unwatched=False):
+            if str(movie.ratingKey) not in synced_movie_ids:
+                movie.reload()
+                if movie.lastViewedAt:
+                    watched_at = movie.lastViewedAt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                    
+                    watched_movies.append({
+                        'movie': movie,
+                        'watched_at': watched_at
+                    })
+    
+        if not watched_movies:
+            print(f"{GREEN}No new movies to sync to Trakt.{RESET}")
             return
+    
+        print(f"Found {len(watched_movies)} new watched movies to sync...")
+        
+        chunk_size = 100
+        for i in range(0, len(watched_movies), chunk_size):
+            chunk = watched_movies[i:i + chunk_size]
+            chunk_data = {"movies": []}
+            
+            for item in chunk:
+                movie = item['movie']
+                imdb_id = None
+                if hasattr(movie, 'guids'):
+                    for guid in movie.guids:
+                        if 'imdb://' in guid.id:
+                            imdb_id = guid.id.replace('imdb://', '')
+                            break
+                
+                if imdb_id:
+                    chunk_data["movies"].append({
+                        "ids": {
+                            "imdb": imdb_id
+                        },
+                        "watched_at": item['watched_at']
+                    })
+            
+            if chunk_data["movies"]:
+                try:
+                    response = requests.post(
+                        "https://api.trakt.tv/sync/history",
+                        headers=self.trakt_headers,
+                        json=chunk_data
+                    )
+                    response.raise_for_status()
+                    print(f"Successfully synced chunk of {len(chunk)} movies")
+                    
+                    for item in chunk:
+                        synced_movie_ids.add(str(item['movie'].ratingKey))
+                        
+                    with open(self.trakt_cache_path, 'w', encoding='utf-8') as f:
+                        json.dump({
+                            'synced_movie_ids': list(synced_movie_ids),
+                            'last_sync': datetime.now().isoformat()
+                        }, f, indent=4)
+                        
+                except Exception as e:
+                    print(f"{RED}Error syncing chunk to Trakt: {e}{RESET}")
+                    continue
+    
+        print(f"Trakt sync complete.")
 
-        CHUNK_SIZE = 100
-        total_items = len(to_sync)
-        print(f"Found {total_items} newly watched items to sync to Trakt.")
-        num_chunks = (total_items + CHUNK_SIZE - 1) // CHUNK_SIZE
-
-        for chunk_index in range(num_chunks):
-            start_i = chunk_index * CHUNK_SIZE
-            end_i = start_i + CHUNK_SIZE
-            chunk = to_sync[start_i:end_i]
-
-            print(f"{YELLOW}Syncing chunk {chunk_index+1}/{num_chunks} "
-                  f"({len(chunk)} items)...{RESET}")
-
-            body = {"movies": [c["body"] for c in chunk]}
-
-            try:
-                sync_resp = requests.post(
-                    "https://api.trakt.tv/sync/history",
-                    headers=self.trakt_headers,
-                    json=body
-                )
-                sync_resp.raise_for_status()
-
-                print(f"{GREEN}Chunk {chunk_index+1} synced successfully.{RESET}")
-                for c in chunk:
-                    self.synced_trakt_history[c["ratingKey"]] = True
-
-                self._save_cache()
-
-            except requests.exceptions.HTTPError as http_err:
-                if http_err.response is not None and http_err.response.status_code == 429:
-                    print(f"{RED}Trakt rate limit reached (429). "
-                          f"Please wait or reduce sync frequency.{RESET}")
-                    break
-                else:
-                    print(f"{RED}Error syncing chunk {chunk_index+1} to Trakt: {http_err}{RESET}")
-                    import traceback
-                    print(traceback.format_exc())
-                break
-            except Exception as e:
-                print(f"{RED}Error syncing chunk {chunk_index+1} to Trakt: {e}{RESET}")
-                import traceback
-                print(traceback.format_exc())
-                break
-        print(f"Skipped {skipped_synced} Plex items already synced to Trakt.")
-        print(f"Done syncing watch history to Trakt!")
-
+    # ------------------------------------------------------------------------
+    # CALCULATE SCORES
+    # ------------------------------------------------------------------------
     def calculate_movie_score(self, movie) -> float:
         user_genres = Counter(self.watched_data['genres'])
         user_dirs = Counter(self.watched_data['directors'])
@@ -752,220 +842,9 @@ class PlexMovieRecommender:
 
         return score
 
-    def get_movie_details(self, movie) -> Dict:
-        try:
-            movie.reload()
-        except Exception as e:
-            print(f"{YELLOW}Warning: Could not reload movie '{movie.title}': {e}{RESET}")
-        ratings = {}
-        if hasattr(movie, 'rating'):
-            ratings['imdb_rating'] = round(float(movie.rating), 1) if movie.rating else 0
-        if hasattr(movie, 'audienceRating'):
-            ratings['audience_rating'] = round(float(movie.audienceRating), 1) if movie.audienceRating else 0
-        if hasattr(movie, 'ratingCount'):
-            ratings['votes'] = movie.ratingCount
-
-        sim_score = self.calculate_movie_score(movie)
-
-        cast_list = []
-        director_name = "N/A"
-        language_str = "N/A"
-        imdb_id = None
-
-        if self.show_cast or self.show_director:
-            if hasattr(movie, 'roles'):
-                cast_list = [r.tag for r in movie.roles[:3]]
-
-            if hasattr(movie, 'directors') and movie.directors:
-                director_name = movie.directors[0].tag
-
-        if self.show_language:
-            try:
-                media = movie.media[0]
-                part = media.parts[0]
-                audio_streams = part.audioStreams()
-                if audio_streams:
-                    primary_audio = audio_streams[0]
-                    lang_code = (
-                        getattr(primary_audio, 'languageTag', None) or
-                        getattr(primary_audio, 'languageCode', None) or
-                        getattr(primary_audio, 'language', None)
-                    )
-                    if lang_code:
-                        language = get_full_language_name(lang_code).lower()
-                        language_str = language.capitalize()
-            except:
-                pass
-
-        if self.show_imdb_link:
-            try:
-                imdb_id = self._get_plex_movie_imdb_id(movie)
-            except Exception as e:
-                print(f"{YELLOW}Error fetching IMDb ID for '{movie.title}': {e}{RESET}")
-
-        return {
-            'title': movie.title,
-            'year': getattr(movie, 'year', None),
-            'genres': [g.tag.lower() for g in movie.genres] if hasattr(movie, 'genres') else [],
-            'summary': getattr(movie, 'summary', ''),
-            'ratings': ratings,
-            'similarity_score': sim_score,
-            'cast': cast_list,
-            'director': director_name,
-            'language': language_str,
-            'imdb_id': imdb_id
-        }
-
-    def get_unwatched_library_movies(self) -> List[Dict]:
-        print(f"\n{YELLOW}Fetching unwatched movies from Plex library...{RESET}")
-        movies_section = self.plex.library.section(self.library_title)
-        
-        current_all = movies_section.all()
-        current_all_count = len(current_all)
-        current_unwatched = movies_section.search(unwatched=True)
-        current_unwatched_count = len(current_unwatched)
-    
-        if (current_all_count == self.cached_library_movie_count and
-            current_unwatched_count == self.cached_unwatched_count):
-            print(f"Unwatched count unchanged. Using cached data for faster performance.")
-            return self.cached_unwatched_movies
-    
-        unwatched_details = []
-        for i, movie in enumerate(current_unwatched, start=1):
-            self._show_progress("Scanning unwatched", i, current_unwatched_count)
-            info = self.get_movie_details(movie)
-            
-            unwatched_details.append(info)
-        print()
-    
-        print(f"Found {len(unwatched_details)} unwatched movies matching your criteria.\n")
-    
-        self.cached_library_movie_count = current_all_count
-        self.cached_unwatched_count = current_unwatched_count
-        self.cached_unwatched_movies = unwatched_details
-        self._save_unwatched_cache()
-        return unwatched_details
-
-    def get_trakt_recommendations(self) -> List[Dict]:
-        print(f"{YELLOW}Fetching recommendations from Trakt...{RESET}")
-        try:
-            url = "https://api.trakt.tv/recommendations/movies"
-            collected_recs = []
-            page = 1
-            per_page = 100  # Trakt's maximum allowed per page
-    
-            while len(collected_recs) < self.limit_trakt_results:
-                response = requests.get(
-                    url,
-                    headers=self.trakt_headers,
-                    params={
-                        'limit': per_page,
-                        'page': page,
-                        'extended': 'full'
-                    }
-                )
-    
-                if response.status_code == 200:
-                    movies = response.json()
-                    if not movies:
-                        break
-    
-                    for m in movies:
-                        if len(collected_recs) >= self.limit_trakt_results:
-                            break
-    
-                        base_rating = float(m.get('rating', 0.0))
-                        m['_randomized_rating'] = base_rating + random.uniform(0, 0.5)
-    
-                    movies.sort(key=lambda x: x['_randomized_rating'], reverse=True)
-    
-                    for movie in movies:
-                        if len(collected_recs) >= self.limit_trakt_results:
-                            break
-    
-                        if self._is_movie_in_library(movie['title'], movie.get('year')):
-                            continue
-    
-                        ratings = {
-                            'imdb_rating': round(float(movie.get('rating', 0)), 1),
-                            'votes': movie.get('votes', 0)
-                        }
-                        md = {
-                            'title': movie['title'],
-                            'year': movie['year'],
-                            'ratings': ratings,
-                            'summary': movie.get('overview', ''),
-                            'genres': [g.lower() for g in movie.get('genres', [])],
-                            'cast': [],
-                            'director': "N/A",
-                            'language': "N/A",
-                            'imdb_id': movie['ids'].get('imdb') if 'ids' in movie else None
-                        }
-    
-                        if any(g in self.exclude_genres for g in md['genres']):
-                            continue
-    
-                        tmdb_id = None
-                        if 'ids' in movie and isinstance(movie['ids'], dict):
-                            tmdb_id = movie['ids'].get('tmdb')
-    
-                        if tmdb_id and self.tmdb_api_key:
-                            if self.show_language:
-                                try:
-                                    resp_lang = requests.get(
-                                        f"https://api.themoviedb.org/3/movie/{tmdb_id}",
-                                        params={'api_key': self.tmdb_api_key}
-                                    )
-                                    resp_lang.raise_for_status()
-                                    d = resp_lang.json()
-                                    if 'original_language' in d:
-                                        md['language'] = get_full_language_name(d['original_language'])
-                                except:
-                                    pass
-    
-                            if self.show_cast or self.show_director:
-                                try:
-                                    resp_credits = requests.get(
-                                        f"https://api.themoviedb.org/3/movie/{tmdb_id}/credits",
-                                        params={'api_key': self.tmdb_api_key}
-                                    )
-                                    resp_credits.raise_for_status()
-                                    c_data = resp_credits.json()
-    
-                                    if self.show_cast and 'cast' in c_data:
-                                        c_sorted = c_data['cast'][:3]
-                                        md['cast'] = [c['name'] for c in c_sorted]
-    
-                                    if self.show_director and 'crew' in c_data:
-                                        directors = [p for p in c_data['crew'] if p.get('job') == 'Director']
-                                        if directors:
-                                            md['director'] = directors[0]['name']
-                                except:
-                                    pass
-    
-                        collected_recs.append(md)
-    
-                    if len(movies) < per_page:
-                        break
-    
-                    page += 1
-                else:
-                    print(f"{RED}Error getting Trakt recommendations: {response.status_code}{RESET}")
-                    if response.status_code == 401:
-                        print(f"{YELLOW}Try re-authenticating with Trakt{RESET}")
-                        self._authenticate_trakt()
-                    break
-    
-            collected_recs.sort(key=lambda x: x.get('ratings', {}).get('imdb_rating', 0), reverse=True)
-            random.shuffle(collected_recs)
-            final_recs = collected_recs[:self.limit_trakt_results]
-            print(f"Collected {len(final_recs)} Trakt recommendations after exclusions.")
-            return final_recs
-    
-        except Exception as e:
-            print(f"{RED}Error getting Trakt recommendations: {e}{RESET}")
-            return []
-
+    # ------------------------------------------------------------------------
+    # GET RECOMMENDATIONS
+    # ------------------------------------------------------------------------
     def get_recommendations(self) -> Dict[str, List[Dict]]:
         if self.sync_watch_history:
             self._sync_plex_watched_to_trakt()
@@ -1013,6 +892,126 @@ class PlexMovieRecommender:
             'plex_recommendations': plex_recs,
             'trakt_recommendations': trakt_recs
         }
+
+    def get_trakt_recommendations(self) -> List[Dict]:
+        print(f"{YELLOW}Fetching recommendations from Trakt...{RESET}")
+        try:
+            url = "https://api.trakt.tv/recommendations/movies"
+            collected_recs = []
+            page = 1
+            per_page = 100  # Trakt's maximum allowed per page
+
+            while len(collected_recs) < self.limit_trakt_results:
+                response = requests.get(
+                    url,
+                    headers=self.trakt_headers,
+                    params={
+                        'limit': per_page,
+                        'page': page,
+                        'extended': 'full'
+                    }
+                )
+
+                if response.status_code == 200:
+                    movies = response.json()
+                    if not movies:
+                        break
+
+                    for m in movies:
+                        if len(collected_recs) >= self.limit_trakt_results:
+                            break
+
+                        base_rating = float(m.get('rating', 0.0))
+                        m['_randomized_rating'] = base_rating + random.uniform(0, 0.5)
+
+                    movies.sort(key=lambda x: x['_randomized_rating'], reverse=True)
+
+                    for movie in movies:
+                        if len(collected_recs) >= self.limit_trakt_results:
+                            break
+
+                        if self._is_movie_in_library(movie['title'], movie.get('year')):
+                            continue
+
+                        ratings = {
+                            'imdb_rating': round(float(movie.get('rating', 0)), 1),
+                            'votes': movie.get('votes', 0)
+                        }
+                        md = {
+                            'title': movie['title'],
+                            'year': movie['year'],
+                            'ratings': ratings,
+                            'summary': movie.get('overview', ''),
+                            'genres': [g.lower() for g in movie.get('genres', [])],
+                            'cast': [],
+                            'director': "N/A",
+                            'language': "N/A",
+                            'imdb_id': movie['ids'].get('imdb') if 'ids' in movie else None
+                        }
+
+                        if any(g in self.exclude_genres for g in md['genres']):
+                            continue
+
+                        tmdb_id = None
+                        if 'ids' in movie and isinstance(movie['ids'], dict):
+                            tmdb_id = movie['ids'].get('tmdb')
+
+                        if tmdb_id and self.tmdb_api_key:
+                            if self.show_language:
+                                try:
+                                    resp_lang = requests.get(
+                                        f"https://api.themoviedb.org/3/movie/{tmdb_id}",
+                                        params={'api_key': self.tmdb_api_key}
+                                    )
+                                    resp_lang.raise_for_status()
+                                    d = resp_lang.json()
+                                    if 'original_language' in d:
+                                        md['language'] = get_full_language_name(d['original_language'])
+                                except:
+                                    pass
+
+                            if self.show_cast or self.show_director:
+                                try:
+                                    resp_credits = requests.get(
+                                        f"https://api.themoviedb.org/3/movie/{tmdb_id}/credits",
+                                        params={'api_key': self.tmdb_api_key}
+                                    )
+                                    resp_credits.raise_for_status()
+                                    c_data = resp_credits.json()
+
+                                    if self.show_cast and 'cast' in c_data:
+                                        c_sorted = c_data['cast'][:3]
+                                        md['cast'] = [c['name'] for c in c_sorted]
+
+                                    if self.show_director and 'crew' in c_data:
+                                        directors = [p for p in c_data['crew'] if p.get('job') == 'Director']
+                                        if directors:
+                                            md['director'] = directors[0]['name']
+                                except:
+                                    pass
+
+                        collected_recs.append(md)
+
+                    if len(movies) < per_page:
+                        break
+
+                    page += 1
+                else:
+                    print(f"{RED}Error getting Trakt recommendations: {response.status_code}{RESET}")
+                    if response.status_code == 401:
+                        print(f"{YELLOW}Try re-authenticating with Trakt{RESET}")
+                        self._authenticate_trakt()
+                    break
+
+            collected_recs.sort(key=lambda x: x.get('ratings', {}).get('imdb_rating', 0), reverse=True)
+            random.shuffle(collected_recs)
+            final_recs = collected_recs[:self.limit_trakt_results]
+            print(f"Collected {len(final_recs)} Trakt recommendations after exclusions.")
+            return final_recs
+
+        except Exception as e:
+            print(f"{RED}Error getting Trakt recommendations: {e}{RESET}")
+            return []
 
     def _user_select_recommendations(self, recommended_movies: List[Dict], operation_label: str) -> List[Dict]:
         prompt = (
@@ -1343,6 +1342,7 @@ def cleanup_old_logs(log_dir: str, keep_logs: int):
                 print(f"{YELLOW}Failed to remove old log {f}: {e}{RESET}")
 
 def main():
+    start_time = datetime.now()
     print(f"{CYAN}Movie Recommendations for Plex{RESET}")
     print("-" * 50)
     check_version()
@@ -1422,14 +1422,20 @@ def main():
         import traceback
         print(traceback.format_exc())
 
+    finally:
+        print(f"\n{GREEN}Process completed!{RESET}")
+        runtime = datetime.now() - start_time
+        hours = runtime.seconds // 3600
+        minutes = (runtime.seconds % 3600) // 60
+        seconds = runtime.seconds % 60
+        print(f"Total runtime: {hours:02d}:{minutes:02d}:{seconds:02d}")
+
     if keep_logs > 0 and sys.stdout is not original_stdout:
         try:
             sys.stdout.logfile.close()
             sys.stdout = original_stdout
         except Exception as e:
             print(f"{YELLOW}Error closing log file: {e}{RESET}")
-
-    print(f"\n{GREEN}Process completed!{RESET}")
 
 if __name__ == "__main__":
     main()
