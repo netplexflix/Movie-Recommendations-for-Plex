@@ -32,10 +32,10 @@ Also check out [TV Show Recommendations for Plex](https://github.com/netplexflix
 ---
 ## 🧙‍♂️ How are recommendations picked?
 
-The script checks your Plex library for watched movies and notes its characteristics, such as genre, director, actors, rating,  optionally fetches TMDB keywords (if enabled), ...
+The script checks your Plex library for watched movies and notes its characteristics, such as genres, director, actors, rating,  language, TMDB keywords, ...
 It keeps a frequency count of how often each of these characteristics were found to build a profile on what you like watching.
 
-**For each unwatched Plex movie**, it calculates a similarity score based on how many of those familiar elements it shares with your watch history, giving extra weight to those you watch more frequently.
+**For each unwatched Plex movie**, it calculates a similarity score based on how many of those familiar elements it shares with your watch profile, giving extra weight to those you watch more frequently.
 It also factors in external ratings (e.g. IMDb), then randomly selects from the top matches to avoid repetitive lists.</br>
 
 **For suggestions outside your existing library**, the script uses your watch history to query Trakt for its built-in movie recommendations algorithm.
@@ -166,9 +166,9 @@ Adding labels instead of directly creating a collection gives you more freedom t
 - Go to your movie library
 - Click on All => Advanced filters
 - Filter on your chosen 'label' and set any other criteria
-- For example; you could append the recommendations to a longer list, then 'limit to' 3 for example, and 'sort by' randomly.
+- For example; you could append the recommendations to a longer list, then 'limit to' 5 for example, and 'sort by' randomly.
 - Click on the arrow next to 'Save as' and click on 'Save as Smart Collection'
-- Give the collection a name like 'What should I watch?' and pin it to your home to get 3 random recommendations every time you refresh your home
+- Give the collection a name like 'What should I watch?' and pin it to your home to get 5 random recommendations every time you refresh your home
  ![Image](https://github.com/user-attachments/assets/aabff022-3624-47c9-b9c7-6253f238dcc6)
  ![Image](https://github.com/user-attachments/assets/b5f60a00-32d7-4aad-af2e-fca01d6cc60e)
 
