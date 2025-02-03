@@ -13,7 +13,7 @@ from urllib.parse import quote
 import re
 from datetime import datetime, timezone, timedelta
 
-__version__ = "2.6"
+__version__ = "2.7"
 REPO_URL = "https://github.com/netplexflix/Movie-Recommendations-for-Plex"
 API_VERSION_URL = f"https://api.github.com/repos/netplexflix/Movie-Recommendations-for-Plex/releases/latest"
 
