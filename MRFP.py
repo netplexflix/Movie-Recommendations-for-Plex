@@ -106,6 +106,7 @@ class PlexMovieRecommender:
         self.show_cast = general_config.get('show_cast', False)
         self.show_director = general_config.get('show_director', False)
         self.show_language = general_config.get('show_language', False)
+        self.show_imdb_rating = general_config.get('show_imdb_rating', False)
         self.show_imdb_link = general_config.get('show_imdb_link', False)
         
         exclude_genre_str = general_config.get('exclude_genre', '')
@@ -1266,23 +1267,18 @@ class PlexMovieRecommender:
 # OUTPUT FORMATTING
 # ------------------------------------------------------------------------
 def format_movie_output(movie: Dict,
-                        show_summary: bool = False,
-                        index: Optional[int] = None,
-                        show_cast: bool = False,
-                        show_director: bool = False,
-                        show_language: bool = False,
-                        show_imdb_link: bool = False) -> str:
+                       show_summary: bool = False,
+                       index: Optional[int] = None,
+                       show_cast: bool = False,
+                       show_director: bool = False,
+                       show_language: bool = False,
+                       show_imdb_link: bool = False,
+                       show_imdb_rating: bool = False) -> str:
     bullet = f"{index}. " if index is not None else "- "
     output = f"{bullet}{CYAN}{movie['title']}{RESET} ({movie.get('year', 'N/A')})"
     
     if movie.get('genres'):
         output += f"\n  {YELLOW}Genres:{RESET} {', '.join(movie['genres'])}"
-
-    if 'ratings' in movie and 'imdb_rating' in movie['ratings'] and movie['ratings']['imdb_rating'] > 0:
-        votes_str = ""
-        if 'votes' in movie['ratings']:
-            votes_str = f" ({movie['ratings']['votes']} votes)"
-        output += f"\n  {YELLOW}IMDb Rating:{RESET} {movie['ratings']['imdb_rating']}/10{votes_str}"
 
     if show_summary and movie.get('summary'):
         output += f"\n  {YELLOW}Summary:{RESET} {movie['summary']}"
@@ -1296,6 +1292,14 @@ def format_movie_output(movie: Dict,
 
     if show_language and 'language' in movie and movie['language'] != "N/A":
         output += f"\n  {YELLOW}Language:{RESET} {movie['language']}"
+
+    if show_imdb_rating and 'ratings' in movie:
+        imdb_rating = movie['ratings'].get('imdb', 0) or movie['ratings'].get('imdb_rating', 0)
+        if imdb_rating > 0:
+            votes_str = ""
+            if 'votes' in movie['ratings']:
+                votes_str = f" ({movie['ratings']['votes']} votes)"
+            output += f"\n  {YELLOW}IMDb Rating:{RESET} {imdb_rating}/10{votes_str}"
 
     if show_imdb_link and 'imdb_id' in movie and movie['imdb_id']:
         imdb_link = f"https://www.imdb.com/title/{movie['imdb_id']}/"
@@ -1389,6 +1393,7 @@ def main():
                     show_cast=recommender.show_cast,
                     show_director=recommender.show_director,
                     show_language=recommender.show_language,
+                    show_imdb_rating=recommender.show_imdb_rating,
                     show_imdb_link=recommender.show_imdb_link
                 ))
                 print()
@@ -1408,6 +1413,7 @@ def main():
                         show_cast=recommender.show_cast,
                         show_director=recommender.show_director,
                         show_language=recommender.show_language,
+                        show_imdb_rating=recommender.show_imdb_rating,
                         show_imdb_link=recommender.show_imdb_link
                     ))
                     print()
