@@ -45,6 +45,7 @@ TMDB:
   api_key: YOUR_TMDB_API_KEY
 
 weights: #Make sure the total equals 1
+  userRating_multipliers: true
   genre_weight: 0.25
   keyword_weight: 0.25
   director_weight: 0.20

@@ -1,7 +1,6 @@
 import os
 import plexapi.server
 import yaml
-from datetime import datetime
 import sys
 import requests
 from typing import Dict, List, Set, Optional, Tuple
@@ -61,7 +60,21 @@ def get_full_language_name(lang_code: str) -> str:
         # Add more as needed
     }
     return LANGUAGE_CODES.get(lang_code.lower(), lang_code.capitalize())
-
+	
+RATING_MULTIPLIERS = {
+    0: 0.1,   # Strong dislike
+    1: 0.2,   # Very poor
+    2: 0.4,   # Poor
+    3: 0.6,   # Below average
+    4: 0.8,   # Slightly below average
+    5: 1.0,   # Neutral/baseline
+    6: 1.2,   # Slightly above average
+    7: 1.4,   # Good
+    8: 1.6,   # Very good
+    9: 1.8,   # Excellent
+    10: 2.0   # Outstanding
+    }
+	
 def check_version():
     try:
         response = requests.get(API_VERSION_URL)
@@ -416,23 +429,7 @@ class PlexMovieRecommender:
                 director_name = movie.directors[0].tag
                 
             # Get all audio languages
-            languages = set()
-            if hasattr(movie, 'media') and movie.media:
-                media = movie.media[0]
-                if hasattr(media, 'parts') and media.parts:
-                    part = media.parts[0]
-                    for stream in part.audioStreams():
-                        lang_code = (
-                            getattr(stream, 'languageTag', None) or
-                            getattr(stream, 'languageCode', None) or
-                            getattr(stream, 'language', None)
-                        )
-                        if lang_code:
-                            full_name = get_full_language_name(lang_code)
-                            if full_name != lang_code:
-                                languages.add(full_name)
-            
-            language = list(languages)[0] if languages else 'N/A'
+            language = self._get_movie_language(movie)
             
             # Get ratings
             ratings = {}
@@ -463,11 +460,18 @@ class PlexMovieRecommender:
         
         print(f"Processing {total_watched} watched movies...")
         
-        genre_counter = Counter()
-        director_counter = Counter()
-        actor_counter = Counter()
-        language_counter = Counter()
-        tmdb_keyword_counter = Counter()
+        # Initialize counters
+        counters = {
+            'genres': Counter(),
+            'directors': Counter(),
+            'actors': Counter(),
+            'languages': Counter(),
+            'tmdb_keywords': Counter()
+        }
+        
+        # Check if rating multipliers are enabled
+        weights_config = self.config.get('weights', {})
+        use_rating_multipliers = weights_config.get('userRating_multipliers', False)
         
         for i, movie in enumerate(all_movies, 1):
             self._show_progress("Analyzing watched movies", i, total_watched)
@@ -475,26 +479,37 @@ class PlexMovieRecommender:
             try:
                 movie.reload()
                 
-                # Get movie genres
+                base_count = 1.0
+                
+                # Apply multiplier if enabled and rating exists
+                if use_rating_multipliers and hasattr(movie, 'userRating') and movie.userRating is not None:
+                    rating = int(round(movie.userRating))
+                    multiplier = RATING_MULTIPLIERS.get(rating, 1.0)
+                    final_count = base_count * multiplier
+                else:
+                    final_count = base_count
+                
+                # Process genres
                 if hasattr(movie, 'genres') and movie.genres:
                     for genre in movie.genres:
-                        genre_counter[genre.tag.lower()] += 1
+                        genre_name = genre.tag.lower()
+                        counters['genres'][genre_name] += final_count
                 
-                # Get director
+                # Process director
                 if hasattr(movie, 'directors') and movie.directors:
-                    director_counter[movie.directors[0].tag] += 1
-                    
-                # Get actors (top 3)
+                    director = movie.directors[0].tag
+                    counters['directors'][director] += final_count
+                
+                # Process actors (top 3)
                 if hasattr(movie, 'roles'):
                     for role in movie.roles[:3]:
-                        actor_counter[role.tag] += 1
-                        
-                # Get languages
+                        counters['actors'][role.tag] += final_count
+                
+                # Process languages
                 if hasattr(movie, 'media') and movie.media:
                     media = movie.media[0]
                     if hasattr(media, 'parts') and media.parts:
                         part = media.parts[0]
-                        languages = set()
                         for stream in part.audioStreams():
                             lang_code = (
                                 getattr(stream, 'languageTag', None) or
@@ -504,35 +519,35 @@ class PlexMovieRecommender:
                             if lang_code:
                                 full_name = get_full_language_name(lang_code)
                                 if full_name != lang_code:
-                                    languages.add(full_name)
-                                    language_counter[full_name] += 1
-                        
-                # Get TMDB keywords
+                                    counters['languages'][full_name] += final_count
+                
+                # Process TMDB keywords
                 if self.use_tmdb_keywords and self.tmdb_api_key:
                     tmdb_id = self._get_plex_movie_tmdb_id(movie)
                     if tmdb_id:
                         movie_keywords = self._get_tmdb_keywords_for_id(tmdb_id)
                         for keyword in movie_keywords:
-                            tmdb_keyword_counter[keyword] += 1
+                            counters['tmdb_keywords'][keyword] += final_count
                             
             except Exception as e:
                 print(f"\nError processing {movie.title}: {e}")
                 continue
-    
-        # Calculate percentages
-        max_genre = max(genre_counter.values()) if genre_counter else 1
-        max_director = max(director_counter.values()) if director_counter else 1
-        max_actor = max(actor_counter.values()) if actor_counter else 1
-        max_language = max(language_counter.values()) if language_counter else 1
-        max_keyword = max(tmdb_keyword_counter.values()) if tmdb_keyword_counter else 1
         
+        # Calculate percentages
         return {
-            'genres': {k: v/max_genre for k, v in genre_counter.items()},
-            'directors': {k: v/max_director for k, v in director_counter.items()},
-            'actors': {k: v/max_actor for k, v in actor_counter.items()},
-            'languages': {k: v/max_language for k, v in language_counter.items()},
-            'tmdb_keywords': {k: v/max_keyword for k, v in tmdb_keyword_counter.items()}
+            'genres': self._normalize_counter(counters['genres']),
+            'directors': self._normalize_counter(counters['directors']),
+            'actors': self._normalize_counter(counters['actors']),
+            'languages': self._normalize_counter(counters['languages']),
+            'tmdb_keywords': self._normalize_counter(counters['tmdb_keywords'])
         }
+
+    def _normalize_counter(self, counter: Counter) -> Dict[str, float]:
+        if not counter:
+            return {}
+        
+        max_value = max(counter.values()) if counter else 1
+        return {k: v/max_value for k, v in counter.items()}
 
     def get_unwatched_library_movies(self) -> List[Dict]:
         print(f"\n{YELLOW}Fetching unwatched movies from Plex library...{RESET}")
