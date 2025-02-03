@@ -5,12 +5,15 @@ It can then
 * label unwatched recommended movies in Plex (to create a collection)
 * add new recommendations to Radarr
 
-Requires [Plex](https://www.plex.tv/)
+Requires 
+- [Plex](https://www.plex.tv/)
+- [TMDB API Key](https://developer.themoviedb.org/docs/getting-started)
 
-Optionally requires: 
-   - [TMDB API Key](https://developer.themoviedb.org/docs/getting-started) (for better matching)
-   - [Trakt API](https://trakt.docs.apiary.io/#) (for movie suggestions outside of your existing library)
-   - [Radarr](https://radarr.video/) (for adding new recommendations)
+Optionally requires:
+- [Trakt API key](https://trakt.docs.apiary.io/#) (for movie suggestions outside of your existing library)
+- [Radarr](https://radarr.video/) (for adding new recommendations)
+
+Also check out [TV Show Recommendations for Plex](https://github.com/netplexflix/TV-Show-Recommendations-for-Plex)
 
 ---
 
@@ -18,11 +21,11 @@ Optionally requires:
 - 🧠 **Smart Recommendations**: Analyzes your watch history to understand your preferences
 - 🏷️ **Label Management**: Labels recommended movies in Plex
 - 🎯 **Radarr Integration**: Adds external recommendations to your Radarr wanted list
-- ☑ **Selection**: Select which recommendations you wish to label and/or add to Radarr
+- ☑ **Selection**: Confirm recommendations to label and/or add to Radarr, or have it run unattended
 - 🔍 **Genre Filtering**: Excludes unwanted genres from recommendations
-- 📊 **Rating-Based**: Uses ratings to ensure quality recommendations
-- ☑️ **Trakt Integration**: Uploads your Plex watch history to Trakt and gets personalized recommendations
-- 🗃️ **Caching**: Keeps a cache of operations to speed up subsequent runs and limit API calls
+- 🛠️ **Customizable**: Choose which parameters matter to you
+- ☑️ **Trakt Integration**: Uploads your Plex watch history to Trakt if needed and gets personalized recommendations
+- 🗃️ **Caching**: Keeps a cache of operations to speed up subsequent runs, limit API calls, and avoid duplicates while syncing
 - 💾 **Path Mapping**: Supports different system configurations (NAS, Linux, Windows)
 - 📒 **Logging**: Keep desired amount of run logs
 
@@ -78,6 +81,7 @@ Rename `config.example.yml` to `config.yml` and set up your credentials and pref
 - **show_cast:** `true` will show top 3 cast members.
 - **show_director:** `true` will show the director.
 - **show_language:** `true` will show main movie language.
+- **show_imdb_rating:** `true` will show IMDb ratings
 - **show_imdb_link:** `true` will show an imdb link for each recommended movie.
 - **keep_logs:** The amount of logs to keep of your runs. set to `0` to disable logging.
 
@@ -162,11 +166,11 @@ Adding labels instead of directly creating a collection gives you more freedom t
 - Go to your movie library
 - Click on All => Advanced filters
 - Filter on your chosen 'label' and set any other criteria
-- For example; you could append the recommendations to a longer list, then 'limit to' 5 for example, and 'sort by' randomly.
+- For example; you could append the recommendations to a longer list, then 'limit to' 3 for example, and 'sort by' randomly.
 - Click on the arrow next to 'Save as' and click on 'Save as Smart Collection'
-- Give the collection a name like 'Recommended Movies' and pin it to your home to get 5 random recommendations every time you refresh your home
+- Give the collection a name like 'What should I watch?' and pin it to your home to get 3 random recommendations every time you refresh your home
  ![Image](https://github.com/user-attachments/assets/aabff022-3624-47c9-b9c7-6253f238dcc6)
-
+ ![Image](https://github.com/user-attachments/assets/b5f60a00-32d7-4aad-af2e-fca01d6cc60e)
 
 ---
 
