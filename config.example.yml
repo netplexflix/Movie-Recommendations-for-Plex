@@ -8,7 +8,7 @@ general:
   show_cast: true
   show_director: true
   show_language: true
-  show_imdb_rating: true
+  show_rating: true
   show_imdb_link: true
   keep_logs: 10
 

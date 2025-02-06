@@ -13,7 +13,7 @@ from urllib.parse import quote
 import re
 from datetime import datetime, timezone, timedelta
 
-__version__ = "2.7"
+__version__ = "2.8"
 REPO_URL = "https://github.com/netplexflix/Movie-Recommendations-for-Plex"
 API_VERSION_URL = f"https://api.github.com/repos/netplexflix/Movie-Recommendations-for-Plex/releases/latest"
 
@@ -119,7 +119,7 @@ class PlexMovieRecommender:
         self.show_cast = general_config.get('show_cast', False)
         self.show_director = general_config.get('show_director', False)
         self.show_language = general_config.get('show_language', False)
-        self.show_imdb_rating = general_config.get('show_imdb_rating', False)
+        self.show_rating = general_config.get('show_rating', False)
         self.show_imdb_link = general_config.get('show_imdb_link', False)
         
         exclude_genre_str = general_config.get('exclude_genre', '')
@@ -433,8 +433,8 @@ class PlexMovieRecommender:
             
             # Get ratings
             ratings = {}
-            if hasattr(movie, 'rating'):
-                ratings['imdb'] = round(float(movie.rating), 1) if movie.rating else 0
+            if hasattr(movie, 'audienceRating'):
+                ratings['Rating'] = round(float(movie.audienceRating), 1) if movie.audienceRating else 0
                 
             return {
                 'title': movie.title,
@@ -880,7 +880,7 @@ class PlexMovieRecommender:
                 plex_recs = included_recs
                 plex_recs.sort(
                     key=lambda x: (
-                        x.get('ratings', {}).get('imdb_rating', 0),
+                        x.get('ratings', {}).get('rating', 0),
                         x.get('similarity_score', 0)
                     ),
                     reverse=True
@@ -950,7 +950,7 @@ class PlexMovieRecommender:
                             continue
 
                         ratings = {
-                            'imdb_rating': round(float(movie.get('rating', 0)), 1),
+                            'rating': round(float(movie.get('rating', 0)), 1),
                             'votes': movie.get('votes', 0)
                         }
                         md = {
@@ -1019,7 +1019,7 @@ class PlexMovieRecommender:
                         self._authenticate_trakt()
                     break
 
-            collected_recs.sort(key=lambda x: x.get('ratings', {}).get('imdb_rating', 0), reverse=True)
+            collected_recs.sort(key=lambda x: x.get('ratings', {}).get('rating', 0), reverse=True)
             random.shuffle(collected_recs)
             final_recs = collected_recs[:self.limit_trakt_results]
             print(f"Collected {len(final_recs)} Trakt recommendations after exclusions.")
@@ -1288,7 +1288,7 @@ def format_movie_output(movie: Dict,
                        show_director: bool = False,
                        show_language: bool = False,
                        show_imdb_link: bool = False,
-                       show_imdb_rating: bool = False) -> str:
+                       show_rating: bool = False) -> str:
     bullet = f"{index}. " if index is not None else "- "
     output = f"{bullet}{CYAN}{movie['title']}{RESET} ({movie.get('year', 'N/A')})"
     
@@ -1308,13 +1308,13 @@ def format_movie_output(movie: Dict,
     if show_language and 'language' in movie and movie['language'] != "N/A":
         output += f"\n  {YELLOW}Language:{RESET} {movie['language']}"
 
-    if show_imdb_rating and 'ratings' in movie:
-        imdb_rating = movie['ratings'].get('imdb', 0) or movie['ratings'].get('imdb_rating', 0)
-        if imdb_rating > 0:
+    if show_rating and 'ratings' in movie:
+        rating = movie['ratings'].get('rating', 0) or movie['ratings'].get('rating', 0)
+        if rating > 0:
             votes_str = ""
             if 'votes' in movie['ratings']:
                 votes_str = f" ({movie['ratings']['votes']} votes)"
-            output += f"\n  {YELLOW}IMDb Rating:{RESET} {imdb_rating}/10{votes_str}"
+            output += f"\n  {YELLOW}Rating:{RESET} {rating}/10{votes_str}"
 
     if show_imdb_link and 'imdb_id' in movie and movie['imdb_id']:
         imdb_link = f"https://www.imdb.com/title/{movie['imdb_id']}/"
@@ -1408,7 +1408,7 @@ def main():
                     show_cast=recommender.show_cast,
                     show_director=recommender.show_director,
                     show_language=recommender.show_language,
-                    show_imdb_rating=recommender.show_imdb_rating,
+                    show_rating=recommender.show_rating,
                     show_imdb_link=recommender.show_imdb_link
                 ))
                 print()
@@ -1428,7 +1428,7 @@ def main():
                         show_cast=recommender.show_cast,
                         show_director=recommender.show_director,
                         show_language=recommender.show_language,
-                        show_imdb_rating=recommender.show_imdb_rating,
+                        show_rating=recommender.show_rating,
                         show_imdb_link=recommender.show_imdb_link
                     ))
                     print()
