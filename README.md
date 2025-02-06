@@ -81,7 +81,7 @@ Rename `config.example.yml` to `config.yml` and set up your credentials and pref
 - **show_cast:** `true` will show top 3 cast members.
 - **show_director:** `true` will show the director.
 - **show_language:** `true` will show main movie language.
-- **show_imdb_rating:** `true` will show IMDb ratings
+- **show_rating:** `true` will show Audience ratings 
 - **show_imdb_link:** `true` will show an imdb link for each recommended movie.
 - **keep_logs:** The amount of logs to keep of your runs. set to `0` to disable logging.
 
