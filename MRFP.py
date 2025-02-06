@@ -13,7 +13,7 @@ from urllib.parse import quote
 import re
 from datetime import datetime, timezone, timedelta
 
-__version__ = "2.8"
+__version__ = "2.9"
 REPO_URL = "https://github.com/netplexflix/Movie-Recommendations-for-Plex"
 API_VERSION_URL = f"https://api.github.com/repos/netplexflix/Movie-Recommendations-for-Plex/releases/latest"
 
@@ -207,6 +207,8 @@ class PlexMovieRecommender:
 
         print("Fetching library metadata (for existing movie checks)...")
         self.library_movies = self._get_library_movies_set()
+        self.library_imdb_ids = self._get_library_imdb_ids()
+
 
     # ------------------------------------------------------------------------
     # CONFIG / PLEX SETUP
@@ -366,8 +368,27 @@ class PlexMovieRecommender:
             print(f"{RED}Error getting library movies: {e}{RESET}")
             return set()
 
-    def _is_movie_in_library(self, title: str, year: Optional[int]) -> bool:
-        return (title.lower(), year) in self.library_movies
+    def _get_library_imdb_ids(self) -> Set[str]:
+        imdb_ids = set()
+        try:
+            movies = self.plex.library.section(self.library_title).all()
+            for movie in movies:
+                if hasattr(movie, 'guids'):
+                    for guid in movie.guids:
+                        if guid.id.startswith('imdb://'):
+                            imdb_ids.add(guid.id.replace('imdb://', ''))
+                            break
+        except Exception as e:
+            print(f"{YELLOW}Error retrieving IMDb IDs from library: {e}{RESET}")
+        return imdb_ids
+
+    def _is_movie_in_library(self, title: str, year: Optional[int], imdb_id: Optional[str] = None) -> bool:
+        if (title.lower(), year) in self.library_movies:
+            return True
+        if imdb_id and imdb_id in self.library_imdb_ids:
+            return True
+    
+        return False
 
     def _get_movie_language(self, movie) -> str:
         try:
@@ -946,7 +967,8 @@ class PlexMovieRecommender:
                         if len(collected_recs) >= self.limit_trakt_results:
                             break
 
-                        if self._is_movie_in_library(movie['title'], movie.get('year')):
+                        imdb_id = movie.get('ids', {}).get('imdb')
+                        if self._is_movie_in_library(movie['title'], movie.get('year'), imdb_id=imdb_id):
                             continue
 
                         ratings = {
