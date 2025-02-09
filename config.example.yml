@@ -19,10 +19,16 @@ paths:
 plex:
   url: http://localhost:32400
   token: YOUR_PLEX_TOKEN
+  managed_users: Admin #Options: 'Admin' or specify user(s) (comma separated)
   movie_library_title: Movies
   add_label: true
   label_name: RecommendedMovies
   remove_previous_recommendations: true
+
+tautulli:
+  url: http://localhost:8181
+  api_key: YOUR_TAUTULLI_API_KEY
+  users: None  #using Tautulli users will override managed_users! options: 'None', 'All' or specify users (comma separated)
 
 radarr:
   url: http://localhost:7878

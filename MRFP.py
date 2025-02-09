@@ -1,5 +1,7 @@
 import os
 import plexapi.server
+from plexapi.server import PlexServer
+from plexapi.myplex import MyPlexAccount
 import yaml
 import sys
 import requests
@@ -13,7 +15,7 @@ from urllib.parse import quote
 import re
 from datetime import datetime, timezone, timedelta
 
-__version__ = "2.9"
+__version__ = "3.0b"
 REPO_URL = "https://github.com/netplexflix/Movie-Recommendations-for-Plex"
 API_VERSION_URL = f"https://api.github.com/repos/netplexflix/Movie-Recommendations-for-Plex/releases/latest"
 
@@ -94,6 +96,8 @@ def check_version():
 
 class PlexMovieRecommender:
     def __init__(self, config_path: str):
+        self.config = self._load_config(config_path)
+        self.library_title = self.config['plex'].get('movie_library_title', 'Movies')
         self.cached_watched_count = 0
         self.cached_unwatched_count = 0
         self.cached_library_movie_count = 0
@@ -101,10 +105,12 @@ class PlexMovieRecommender:
         self.cached_unwatched_movies = []
         self.plex_tmdb_cache = {}
         self.tmdb_keywords_cache = {}
+        self.users = self._get_configured_users()
 
         print("Initializing recommendation system...")
-        self.config = self._load_config(config_path)
-        
+        if self.config.get('tautulli', {}).get('users'):
+            if not self.config['tautulli'].get('url') or not self.config['tautulli'].get('api_key'):
+                raise ValueError("Tautulli configuration requires both url and api_key when users are specified")        
         print("Connecting to Plex server...")
         self.plex = self._init_plex()
         print(f"Connected to Plex successfully!\n")
@@ -150,6 +156,27 @@ class PlexMovieRecommender:
         else:
             self._authenticate_trakt()
 
+        # Verify Tautulli/Plex user mapping
+        if self.users['tautulli_users']:
+            print(f"Validating Tautulli users: {self.users['tautulli_users']}")
+            
+            # Skip validation completely if 'All' is specified
+            if any(u.lower() == 'all' for u in self.users['tautulli_users']):
+                print(f"{YELLOW}Using watch history for all Tautulli users{RESET}")
+            else:
+                # Only validate specific users
+                test_params = {'apikey': self.config['tautulli']['api_key'], 'cmd': 'get_users'}
+                users_response = requests.get(f"{self.config['tautulli']['url']}/api/v2", params=test_params)
+                if users_response.status_code == 200:
+                    tautulli_users = [u['username'] for u in users_response.json()['response']['data']]
+                    missing = [u for u in self.users['tautulli_users'] if u not in tautulli_users]
+                    if missing:
+                        raise ValueError(f"Tautulli users not found: {missing}")
+
+        # Verify library exists
+        if not self.plex.library.section(self.library_title):
+            raise ValueError(f"Movie library '{self.library_title}' not found in Plex")
+        
         tmdb_config = self.config.get('TMDB', {})
         self.use_tmdb_keywords = tmdb_config.get('use_TMDB_keywords', False)
         self.tmdb_api_key = tmdb_config.get('api_key', None)
@@ -159,8 +186,17 @@ class PlexMovieRecommender:
         self.cache_dir = os.path.join(os.path.dirname(__file__), "cache")
         os.makedirs(self.cache_dir, exist_ok=True)
         
-        self.watched_cache_path = os.path.join(self.cache_dir, "watched_data_cache.json")
-        self.unwatched_cache_path = os.path.join(self.cache_dir, "unwatched_data_cache.json")
+        # Get user context for cache files
+        if self.users['tautulli_users']:
+            user_ctx = 'tautulli_' + '_'.join(self.users['tautulli_users'])
+        else:
+            user_ctx = 'plex_' + '_'.join(self.users['managed_users'])
+        safe_ctx = re.sub(r'\W+', '', user_ctx)
+        
+        # Update cache paths to be user-specific
+        self.watched_cache_path = os.path.join(self.cache_dir, f"watched_cache_{safe_ctx}.json")
+        self.unwatched_cache_path = os.path.join(self.cache_dir, f"unwatched_cache_{safe_ctx}.json")
+        self.trakt_cache_path = os.path.join(self.cache_dir, f"trakt_sync_cache_{safe_ctx}.json")
         
         # Load watched cache
         if os.path.exists(self.watched_cache_path):
@@ -192,12 +228,17 @@ class PlexMovieRecommender:
         if not hasattr(self, 'synced_trakt_history'):
             self.synced_trakt_history = {}
 
-        self.library_title = self.config['plex'].get('movie_library_title', 'Movies')
-
         current_watched_count = self._get_watched_count()
-        if current_watched_count != self.cached_watched_count:
+        cache_exists = os.path.exists(self.watched_cache_path)
+        
+        if (not cache_exists) or (current_watched_count != self.cached_watched_count):
             print("Watched count changed or no cache found; gathering watched data now. This may take a while...\n")
-            self.watched_data = self._get_watched_movies_data()
+            if self.users['tautulli_users']:
+                print("Using Tautulli users for watch history")
+                self.watched_data = self._get_tautulli_watched_movies_data()
+            else:
+                print("Using managed users for watch history")
+                self.watched_data = self._get_managed_users_watched_data()
             self.watched_data_counters = self.watched_data
             self.cached_watched_count = current_watched_count
             self._save_watched_cache()
@@ -211,7 +252,7 @@ class PlexMovieRecommender:
 
 
     # ------------------------------------------------------------------------
-    # CONFIG / PLEX SETUP
+    # CONFIG / SETUP
     # ------------------------------------------------------------------------
     def _load_config(self, config_path: str) -> Dict:
         try:
@@ -287,6 +328,280 @@ class PlexMovieRecommender:
             print(f"{RED}Error during Trakt authentication: {e}{RESET}")
 
     # ------------------------------------------------------------------------
+    # USERS
+    # ------------------------------------------------------------------------ 
+    def _get_configured_users(self):
+        # Get raw managed users list from config
+        raw_managed = self.config['plex'].get('managed_users', '')
+        managed_users = [u.strip() for u in raw_managed.split(',') if u.strip()]
+        
+        # Get Tautulli users
+        tautulli_users = []
+        tautulli_config = self.config.get('tautulli', {})
+        if isinstance(tautulli_config.get('users'), list):
+            tautulli_users = tautulli_config['users']
+        elif isinstance(tautulli_config.get('users'), str):
+            tautulli_users = [u.strip() for u in tautulli_config['users'].split(',') if u.strip()]
+        
+        # Resolve admin account
+        account = MyPlexAccount(token=self.config['plex']['token'])
+        admin_user = account.username
+        
+        # Replace admin aliases with actual username
+        processed_managed = []
+        for user in managed_users:
+            if user.lower() in ['admin', 'administrator']:
+                processed_managed.append(admin_user)
+            else:
+                processed_managed.append(user)
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        managed_users = [u for u in processed_managed if not (u in seen or seen.add(u))]
+        
+        # Handle "none" case for Tautulli
+        if tautulli_users and tautulli_users[0].lower() == 'none':
+            tautulli_users = []
+        
+        return {
+            'managed_users': managed_users,
+            'tautulli_users': tautulli_users,
+            'admin_user': admin_user
+        }
+
+    def _get_current_users(self) -> str:
+        if self.users['tautulli_users']:
+            return f"Tautulli users: {', '.join(self.users['tautulli_users'])}"
+        return f"Managed users: {', '.join(self.users['managed_users'])}"
+
+    def _get_user_specific_connection(self):
+        if self.users['tautulli_users']:
+            return self.plex
+        try:
+            account = MyPlexAccount(token=self.config['plex']['token'])
+            user = account.user(self.users['managed_users'][0])
+            return self.plex.switchUser(user)
+        except:
+            return self.plex
+
+    def _get_watched_count(self) -> int:
+        if self.users['tautulli_users']:
+            params = {
+                'apikey': self.config['tautulli']['api_key'],
+                'cmd': 'get_history',
+                'media_type': 'movie',
+                'length': 10000
+            }
+            
+            if not any(u.lower() == 'all' for u in self.users['tautulli_users']):
+                params['user'] = ','.join(self.users['tautulli_users'])
+            
+            try:
+                response = requests.get(
+                    f"{self.config['tautulli']['url']}/api/v2",
+                    params=params
+                )
+                if response.status_code == 200:
+                    data = response.json().get('response', {})
+                    history_items = data.get('data', [])
+                    
+                    if isinstance(history_items, dict):
+                        history_items = history_items.get('data', [])
+                    
+                    rating_keys = {str(item.get('rating_key')) for item in history_items if item.get('rating_key')}
+                    return len(rating_keys)
+            except Exception as e:
+                print(f"{YELLOW}Error fetching Tautulli history: {e}{RESET}")
+                return 0
+        else:
+            # For managed users, sum up all unique watched movies
+            try:
+                total_watched = set()  # Using set to avoid counting duplicates
+                movies_section = self.plex.library.section(self.library_title)
+                account = MyPlexAccount(token=self.config['plex']['token'])
+                
+                users_to_process = self.users['managed_users'] or [self.users['admin_user']]
+                
+                for username in users_to_process:
+                    try:
+                        if username.lower() == self.users['admin_user'].lower():
+                            user_plex = self.plex
+                        else:
+                            user = account.user(username)
+                            user_plex = self.plex.switchUser(user)
+                        
+                        watched_movies = user_plex.library.section(self.library_title).search(unwatched=False)
+                        total_watched.update(movie.ratingKey for movie in watched_movies)
+                        
+                    except Exception as e:
+                        print(f"{YELLOW}Error getting watch count for user {username}: {e}{RESET}")
+                        continue
+                        
+                return len(total_watched)
+                
+            except Exception as e:
+                print(f"{YELLOW}Error getting watch count: {e}{RESET}")
+                return 0
+				
+    def _get_tautulli_watched_movies_data(self) -> Dict:
+        movies_section = self.plex.library.section(self.library_title)
+        
+        counters = {
+            'genres': Counter(),
+            'directors': Counter(),
+            'actors': Counter(),
+            'languages': Counter(),
+            'tmdb_keywords': Counter()
+        }
+		
+        not_found_count = 0
+		
+        users = self.users.get('tautulli_users', [])
+        if not users:
+            return self._normalize_all_counters(counters)
+        
+        try:
+            params = {
+                'apikey': self.config['tautulli']['api_key'],
+                'cmd': 'get_history',
+                'media_type': 'movie',
+                'length': 10000
+            }
+            
+            if not any(u.lower() == 'all' for u in users):
+                params['user'] = ','.join(users)
+            
+            response = requests.get(
+                f"{self.config['tautulli']['url']}/api/v2",
+                params=params
+            )
+            response.raise_for_status()
+            
+            response_data = response.json()
+            if 'response' not in response_data:
+                raise ValueError("Invalid Tautulli API response format")
+                
+            history_data = response_data['response'].get('data', {})
+            if isinstance(history_data, dict):
+                # Paginated format (v2.6+)
+                history_items = history_data.get('data', [])
+                total = history_data.get('recordsFiltered', 0)
+            else:
+                # Legacy format
+                history_items = history_data
+                total = len(history_items)
+    
+            if not isinstance(history_items, list):
+                raise ValueError("Invalid history data format from Tautulli")
+            
+            rating_keys = {str(item.get('rating_key')) for item in history_items if item.get('rating_key')}
+            
+            movie_titles = {
+                str(item.get('rating_key')): item.get('title', 'Unknown Title') 
+                for item in history_items if item.get('rating_key')
+            }
+            
+            print(f"\nFound {len(rating_keys)} watched movies for {', '.join(users)}")
+            
+            # Create mapping of rating keys to movie details from Tautulli
+            movie_details = {
+                str(item.get('rating_key')): {
+                    'title': item.get('title', 'Unknown Title'),
+                    'year': item.get('year'),
+                    'last_watched': item.get('started')
+                }
+                for item in history_items if item.get('rating_key')
+            }
+            
+            total_movies = len(movie_details)
+            print(f"\nProcessing {total_movies} watched movies from Tautulli history:")
+            
+            for i, (rating_key, details) in enumerate(movie_details.items(), 1):
+                try:
+                    self._show_progress("Processing", i, total_movies)
+                    
+                    movie = None
+                    
+                    # Trying by rating key
+                    try:
+                        movie = movies_section.fetchItem(int(rating_key))
+                    except:
+                        pass
+                    
+                    # Trying by title and year
+                    if not movie and details['title'] and details['year']:
+                        matches = movies_section.search(title=details['title'])
+                        movie = next(
+                            (m for m in matches if m.year == details['year']), 
+                            None
+                        )
+                    
+                    if movie:
+                        movie.reload()
+                        self._process_movie_counters(movie, counters)
+                    else:
+                        not_found_count += 1
+                        
+                except Exception as e:
+                    not_found_count += 1
+                    continue
+                    
+#            print(f"{YELLOW}DEBUG: {not_found_count} watched movies were no longer found in your library{RESET}\n")
+                
+        except Exception as e:
+            print(f"{RED}Error getting Tautulli watch history: {e}{RESET}")
+            
+        return self._normalize_all_counters(counters)
+    
+    def _is_valid_movie_entry(self, entry: dict) -> bool:
+        return (
+            isinstance(entry, dict) and 
+            entry.get('media_type') == 'movie' and
+            isinstance(entry.get('metadata'), dict) and
+            entry['metadata'].get('title')
+        )
+    
+    def _get_managed_users_watched_data(self):
+        movies_section = self.plex.library.section(self.library_title)
+        if not movies_section:
+            raise ValueError(f"Library section '{self.library_title}' not found")
+
+        counters = {
+            'genres': Counter(),
+            'directors': Counter(),
+            'actors': Counter(),
+            'languages': Counter(),
+            'tmdb_keywords': Counter()
+        }
+        
+        account = MyPlexAccount(token=self.config['plex']['token'])
+        admin_user = self.users['admin_user']
+        
+        users_to_process = self.users['managed_users'] or [admin_user]
+        
+        for username in users_to_process:
+            try:
+                if username.lower() == self.users['admin_user'].lower():
+                    user_plex = self.plex
+                else:
+                    user = account.user(username)
+                    user_plex = self.plex.switchUser(user)
+                
+                movies = user_plex.library.section(self.library_title).search(unwatched=False)
+                total = len(movies)
+                print(f"\nScanning watched movies for {username}:")
+
+                for i, movie in enumerate(movies, 1):
+                    self._show_progress(f"Processing {username}'s watched", i, total)
+                    self._process_movie_counters(movie, counters)
+                    
+            except Exception as e:
+                print(f"{RED}Error processing user {username}: {e}{RESET}")
+                continue
+        
+        return self._normalize_all_counters(counters)
+
+    # ------------------------------------------------------------------------
     # CACHING LOGIC
     # ------------------------------------------------------------------------ 
     def _save_watched_cache(self):
@@ -299,7 +614,8 @@ class PlexMovieRecommender:
                 'last_updated': datetime.now().isoformat()
             }
             with open(self.watched_cache_path, 'w', encoding='utf-8') as f:
-                json.dump(cache_data, f, indent=4)
+                json.dump(cache_data, f, indent=4, ensure_ascii=False)
+                
         except Exception as e:
             print(f"{YELLOW}Error saving watched cache: {e}{RESET}")
     
@@ -312,21 +628,14 @@ class PlexMovieRecommender:
                 'last_updated': datetime.now().isoformat()
             }
             with open(self.unwatched_cache_path, 'w', encoding='utf-8') as f:
-                json.dump(cache_data, f, indent=4)
+                json.dump(cache_data, f, indent=4, ensure_ascii=False)
+                
         except Exception as e:
             print(f"{YELLOW}Error saving unwatched cache: {e}{RESET}")
     
     def _save_cache(self):
         self._save_watched_cache()
         self._save_unwatched_cache()
-
-    def _get_watched_count(self) -> int:
-        try:
-            movies_section = self.plex.library.section(self.library_title)
-            watched_movies = movies_section.search(unwatched=False)
-            return len(watched_movies)
-        except:
-            return 0
 
     # ------------------------------------------------------------------------
     # PATH HANDLING
@@ -474,94 +783,40 @@ class PlexMovieRecommender:
             print(f"{YELLOW}Error getting movie details for {movie.title}: {e}{RESET}")
             return {}
 
-    def _get_watched_movies_data(self) -> Dict:
-        movies_section = self.plex.library.section(self.library_title)
-        all_movies = movies_section.search(unwatched=False)
-        total_watched = len(all_movies)
+    def _process_movie_counters(self, movie, counters):
+        movie_details = self.get_movie_details(movie)
         
-        print(f"Processing {total_watched} watched movies...")
-        
-        # Initialize counters
-        counters = {
-            'genres': Counter(),
-            'directors': Counter(),
-            'actors': Counter(),
-            'languages': Counter(),
-            'tmdb_keywords': Counter()
-        }
-        
-        # Check if rating multipliers are enabled
-        weights_config = self.config.get('weights', {})
-        use_rating_multipliers = weights_config.get('userRating_multipliers', False)
-        
-        for i, movie in enumerate(all_movies, 1):
-            self._show_progress("Analyzing watched movies", i, total_watched)
-            
+        try:
+            rating = float(getattr(movie, 'userRating', 0))
+        except (TypeError, ValueError):
             try:
-                movie.reload()
-                
-                base_count = 1.0
-                
-                # Apply multiplier if enabled and rating exists
-                if use_rating_multipliers and hasattr(movie, 'userRating') and movie.userRating is not None:
-                    rating = int(round(movie.userRating))
-                    multiplier = RATING_MULTIPLIERS.get(rating, 1.0)
-                    final_count = base_count * multiplier
-                else:
-                    final_count = base_count
-                
-                # Process genres
-                if hasattr(movie, 'genres') and movie.genres:
-                    for genre in movie.genres:
-                        genre_name = genre.tag.lower()
-                        counters['genres'][genre_name] += final_count
-                
-                # Process director
-                if hasattr(movie, 'directors') and movie.directors:
-                    director = movie.directors[0].tag
-                    counters['directors'][director] += final_count
-                
-                # Process actors (top 3)
-                if hasattr(movie, 'roles'):
-                    for role in movie.roles[:3]:
-                        counters['actors'][role.tag] += final_count
-                
-                # Process languages
-                if hasattr(movie, 'media') and movie.media:
-                    media = movie.media[0]
-                    if hasattr(media, 'parts') and media.parts:
-                        part = media.parts[0]
-                        for stream in part.audioStreams():
-                            lang_code = (
-                                getattr(stream, 'languageTag', None) or
-                                getattr(stream, 'languageCode', None) or
-                                getattr(stream, 'language', None)
-                            )
-                            if lang_code:
-                                full_name = get_full_language_name(lang_code)
-                                if full_name != lang_code:
-                                    counters['languages'][full_name] += final_count
-                
-                # Process TMDB keywords
-                if self.use_tmdb_keywords and self.tmdb_api_key:
-                    tmdb_id = self._get_plex_movie_tmdb_id(movie)
-                    if tmdb_id:
-                        movie_keywords = self._get_tmdb_keywords_for_id(tmdb_id)
-                        for keyword in movie_keywords:
-                            counters['tmdb_keywords'][keyword] += final_count
-                            
-            except Exception as e:
-                print(f"\nError processing {movie.title}: {e}")
-                continue
-        
-        # Calculate percentages
-        return {
-            'genres': self._normalize_counter(counters['genres']),
-            'directors': self._normalize_counter(counters['directors']),
-            'actors': self._normalize_counter(counters['actors']),
-            'languages': self._normalize_counter(counters['languages']),
-            'tmdb_keywords': self._normalize_counter(counters['tmdb_keywords'])
-        }
+                rating = float(getattr(movie, 'audienceRating', 5.0))
+            except (TypeError, ValueError):
+                rating = 5.0
+    
+        # Clamp rating to 0-10 scale and convert to integer
+        rating = max(0, min(10, int(round(rating))))
+        multiplier = RATING_MULTIPLIERS.get(rating, 1.0)
+    
+        # Process genres with multiplier
+        for genre in movie_details.get('genres', []):
+            counters['genres'][genre] += multiplier
+            
+        # Process director
+        if director := movie_details.get('director'):
+            counters['directors'][director] += multiplier
+            
+        # Process actors (top 3 only)
+        for actor in movie_details.get('cast', [])[:3]:
+            counters['actors'][actor] += multiplier
+            
+        # Process language
+        if language := movie_details.get('language'):
+            counters['languages'][language] += multiplier
+            
+        # Process TMDB keywords
+        for keyword in movie_details.get('tmdb_keywords', []):
+            counters['tmdb_keywords'][keyword] += multiplier
 
     def _normalize_counter(self, counter: Counter) -> Dict[str, float]:
         if not counter:
@@ -570,9 +825,20 @@ class PlexMovieRecommender:
         max_value = max(counter.values()) if counter else 1
         return {k: v/max_value for k, v in counter.items()}
 
+    def _normalize_all_counters(self, counters):
+        return {
+            'genres': self._normalize_counter(counters['genres']),
+            'directors': self._normalize_counter(counters['directors']),
+            'actors': self._normalize_counter(counters['actors']),
+            'languages': self._normalize_counter(counters['languages']),
+            'tmdb_keywords': self._normalize_counter(counters['tmdb_keywords'])
+        }
+
     def get_unwatched_library_movies(self) -> List[Dict]:
         print(f"\n{YELLOW}Fetching unwatched movies from Plex library...{RESET}")
-        movies_section = self.plex.library.section(self.library_title)
+        
+        user_plex = self._get_user_specific_connection()
+        movies_section = user_plex.library.section(self.library_title)
         
         current_all = movies_section.all()
         current_all_count = len(current_all)
@@ -581,7 +847,7 @@ class PlexMovieRecommender:
     
         if (current_all_count == self.cached_library_movie_count and
             current_unwatched_count == self.cached_unwatched_count):
-            print(f"Unwatched count unchanged. Using cached data for faster performance.")
+            print(f"Unwatched count unchanged. Using cached data for {self._get_current_users()}.")
             return self.cached_unwatched_movies
     
         unwatched_details = []
@@ -702,49 +968,170 @@ class PlexMovieRecommender:
         if current == total:
             sys.stdout.write("\n")
 
+    def _get_imdb_id_from_tmdb(self, tmdb_id: int) -> Optional[str]:
+        try:
+            url = f"https://api.themoviedb.org/3/movie/{tmdb_id}"
+            params = {'api_key': self.tmdb_api_key}
+            response = requests.get(url, params=params)
+            if response.status_code == 200:
+                return response.json().get('imdb_id')
+        except Exception as e:
+            print(f"{YELLOW}TMDB API Error: {e}{RESET}")
+        return None
     # ------------------------------------------------------------------------
     # TRAKT SYNC
     # ------------------------------------------------------------------------
+    def _get_tautulli_watched_for_sync(self) -> List[dict]:
+        params = {
+            'apikey': self.config['tautulli']['api_key'],
+            'cmd': 'get_history',
+            'media_type': 'movie',
+            'length': 10000
+        }
+        
+        # Add user filter if specific users are configured
+        if not any(u.lower() == 'all' for u in self.users['tautulli_users']):
+            params['user'] = ','.join(self.users['tautulli_users'])
+        
+        try:
+            print("DEBUG: Fetching Tautulli watch history")
+            response = requests.get(
+                f"{self.config['tautulli']['url']}/api/v2",
+                params=params
+            )
+            response.raise_for_status()
+            
+            json_data = response.json()
+            print(f"DEBUG: Raw Tautulli response: {json_data.keys()}")
+            
+            history_data = json_data.get('response', {}).get('data', [])
+            if isinstance(history_data, dict):
+                history_items = history_data.get('data', [])
+            else:
+                history_items = history_data
+                
+            # Create dictionary to track latest watch time for each movie
+            movie_watches = {}
+            for item in history_items:
+                if not isinstance(item, dict):
+                    continue
+                    
+                rating_key = str(item.get('rating_key'))
+                if not rating_key:
+                    continue
+                    
+                # Convert timestamp to ISO format
+                watched_at = datetime.fromtimestamp(
+                    int(item.get('started', 0)), 
+                    tz=timezone.utc
+                ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                
+                # Update if this is the most recent watch
+                if rating_key not in movie_watches or watched_at > movie_watches[rating_key]['last_watched']:
+                    movie_watches[rating_key] = {
+                        'rating_key': rating_key,
+                        'last_watched': watched_at
+                    }
+            
+            watched_items = list(movie_watches.values())
+            print(f"DEBUG: Found {len(watched_items)} unique watched movies")
+            return watched_items
+                
+        except Exception as e:
+            print(f"{RED}Error fetching Tautulli history: {e}{RESET}")
+            import traceback
+            print(traceback.format_exc())
+            return []
+
+    def _get_plex_managed_users_watched_for_sync(self) -> List[dict]:
+        watched_items = []
+        account = MyPlexAccount(token=self.config['plex']['token'])
+        
+        users_to_process = self.users['managed_users'] or [self.users['admin_user']]
+        
+        for username in users_to_process:
+            try:
+                user = account.user(username)
+                user_plex = self.plex.switchUser(user)
+                movies = user_plex.library.section(self.library_title).search(unwatched=False)
+                
+                for movie in movies:
+                    if movie.lastViewedAt:
+                        watched_items.append({
+                            'rating_key': movie.ratingKey,
+                            'last_watched': movie.lastViewedAt.astimezone(timezone.utc).isoformat()
+                        })
+                    else:
+                        print(f"{YELLOW}Missing watch date for {movie.title} ({movie.ratingKey}){RESET}")
+                        
+            except Exception as e:
+                print(f"{RED}Error processing user {username}: {e}{RESET}")
+        
+        return watched_items
+
     def _sync_plex_watched_to_trakt(self):
         if not self.sync_watch_history:
             return
-    
+        
         print(f"{YELLOW}Checking Trakt sync status...{RESET}")
         
-        self.trakt_cache_path = os.path.join(self.cache_dir, "trakt_sync_cache.json")
-        synced_movie_ids = set()
+        # Debug cache paths
+        print(f"DEBUG: Using cache path: {self.trakt_cache_path}")
+        print(f"DEBUG: Cache exists: {os.path.exists(self.trakt_cache_path)}")
         
+        # Get watched movies based on configuration
+        if self.users['tautulli_users']:
+            print("DEBUG: Getting Tautulli watch history")
+            watched_items = self._get_tautulli_watched_for_sync()
+        else:
+            print("DEBUG: Getting Plex managed users watch history")
+            watched_items = self._get_plex_managed_users_watched_for_sync()
+        
+        print(f"DEBUG: Found {len(watched_items)} watched items")
+        
+        synced_movie_ids = set()
         if os.path.exists(self.trakt_cache_path):
             try:
                 with open(self.trakt_cache_path, 'r', encoding='utf-8') as f:
                     cache_data = json.load(f)
                     synced_movie_ids = set(cache_data.get('synced_movie_ids', []))
+                    print(f"DEBUG: Loaded {len(synced_movie_ids)} synced IDs from cache")
             except Exception as e:
                 print(f"{YELLOW}Error loading Trakt cache: {e}{RESET}")
-    
-        movies_section = self.plex.library.section(self.library_title)
-        watched_movies = []
         
-        for movie in movies_section.search(unwatched=False):
-            if str(movie.ratingKey) not in synced_movie_ids:
-                movie.reload()
-                if movie.lastViewedAt:
-                    watched_at = movie.lastViewedAt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        movies_to_sync = []
+        movies_section = self.plex.library.section(self.library_title)
+        
+        for item in watched_items:
+            try:
+                rating_key = str(item.get('rating_key'))
+                if not rating_key:
+                    continue
                     
-                    watched_movies.append({
-                        'movie': movie,
-                        'watched_at': watched_at
-                    })
-    
-        if not watched_movies:
+                if rating_key in synced_movie_ids:
+                    print(f"DEBUG: Skipping already synced movie: {rating_key}")
+                    continue
+                    
+                movie = movies_section.fetchItem(int(rating_key))
+                movies_to_sync.append({
+                    'movie': movie,
+                    'watched_at': item['last_watched']
+                })
+                print(f"DEBUG: Adding to sync: {movie.title} ({rating_key})")
+                    
+            except Exception as e:
+                print(f"{YELLOW}Error processing {rating_key}: {str(e)}{RESET}")
+                continue
+        
+        if not movies_to_sync:
             print(f"{GREEN}No new movies to sync to Trakt.{RESET}")
             return
     
-        print(f"Found {len(watched_movies)} new watched movies to sync...")
+        print(f"Found {len(movies_to_sync)} new watched movies to sync...")
         
         chunk_size = 100
-        for i in range(0, len(watched_movies), chunk_size):
-            chunk = watched_movies[i:i + chunk_size]
+        for i in range(0, len(movies_to_sync), chunk_size):
+            chunk = movies_to_sync[i:i + chunk_size]
             chunk_data = {"movies": []}
             
             for item in chunk:
