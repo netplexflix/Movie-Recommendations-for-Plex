@@ -23,6 +23,7 @@ plex:
   movie_library_title: Movies
   add_label: true
   label_name: RecommendedMovies
+  append_usernames: true
   remove_previous_recommendations: true
 
 tautulli:
