@@ -1,6 +1,6 @@
 # 🎬 Movie Recommendations for Plex 🎯
 
-This script analyzes your Plex viewing patterns and suggests movies you might enjoy, both from your existing unwatched library and from Trakt's recommendations.
+This script analyzes the Plex viewing patterns of yourself and/or selected users and suggests movies they may enjoy, both from your existing unwatched library and from Trakt's recommendations.
 It can then
 * label unwatched recommended movies in Plex (to create a collection)
 * add new recommendations to Radarr
@@ -12,13 +12,15 @@ Requires
 Optionally requires:
 - [Trakt API key](https://trakt.docs.apiary.io/#) (for movie suggestions outside of your existing library)
 - [Radarr](https://radarr.video/) (for adding new recommendations)
+- [Tautulli](https://tautulli.com/) (for fetching external users' watch history)
 
 Also check out [TV Show Recommendations for Plex](https://github.com/netplexflix/TV-Show-Recommendations-for-Plex)
 
 ---
 
 ## ✨ Features
-- 🧠 **Smart Recommendations**: Analyzes your watch history to understand your preferences
+- 👥 **User Selection**: Analyze your own profile and/or that of selected users.
+- 🧠 **Smart Recommendations**: Analyzes watch history to understand preferences
 - 🏷️ **Label Management**: Labels recommended movies in Plex
 - 🎯 **Radarr Integration**: Adds external recommendations to your Radarr wanted list
 - ☑ **Selection**: Confirm recommendations to label and/or add to Radarr, or have it run unattended
@@ -116,10 +118,20 @@ paths:
 ### Plex
 - **url:** Edit if needed.
 - **token:** [Finding your Plex Token](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/)
-- **library_title:** The title of your Movie Library
-- **add_label:** Adds label to the recommended Movies in your Plex library if set to `true`
-- **label_name:** The label to be used
+- **managed_users:** Which [Managed Users](https://support.plex.tv/articles/203948776-managed-users/) to analyze. Defaults to Admin.
+- **movie_library_title:** The title of your Movie Library.
+- **add_label:** Adds label to the recommended Movies in your Plex library if set to `true`.
+- **label_name:** The label to be used.
+- **append_usernames:** `true` will append the selected usernames to the `label_name`.
 - **remove_previous_recommendations:** If set to `true` removes the label from previously recommendation runs. If set to `false' simply appends the new recommendations.
+
+### Tautulli
+- **url:** Edit if needed.
+- **api_key:** Can be found in Tautulli settings under 'Web Interface'.
+- **users:** Which Tautulli users to analyze. Defaults to `None`.
+
+> [!IMPORTANT]
+> Selecting Tautulli users will override 'managed_users'. You can ofcourse also select managed users via Tautulli.
 
 ### Radarr
 - **url:** Change if needed
@@ -133,6 +145,10 @@ paths:
 ### Trakt
 - Your Trakt API credentials can be found in Trakt under settings => [Your Trakt Apps](https://trakt.tv/oauth/applications) [More info here](https://trakt.docs.apiary.io/#)
 - **sync_watch_history:** Can be set to `false` if you already build your Trakt watch history another way (e.g.: through Trakt's Plex Scrobbler).
+
+> [!IMPORTANT]
+> The Trakt watch history sync is **one way**. That means that if you're doing different runs for different users, their combined watch history will be synced to Trakt and recommendations will be based on their combined profile.
+> You can manually remove items from watch history within Trakt. To remove large batches of watch history you'll have to create a support ticket with Trakt.
 
 ### TMDB Settings
 - **use_TMDB_keywords:** `true` uses TMDB (plot)keywords for matching (Recommended). In this case an api_key is required.
@@ -180,6 +196,20 @@ Adding labels instead of directly creating a collection gives you more freedom t
 - Give the collection a name like 'What should I watch?' and pin it to your home to get 5 random recommendations every time you refresh your home
  ![Image](https://github.com/user-attachments/assets/aabff022-3624-47c9-b9c7-6253f238dcc6)
  ![Image](https://github.com/user-attachments/assets/b5f60a00-32d7-4aad-af2e-fca01d6cc60e)
+
+
+### 👥 User-based collections
+If you are doing multiple runs analyzing different users(groups) and use `append_usernames` for the label, you can make a "What should I watch?" smart collection for each of those user(group) labels.
+In Plex, you can make these collections visible only to the relevant users.
+Edit your collection, go to 'Labels' and add a new label for the collection. **IMPORTANT:** This label has to be different from the labels used to tag the movies! Otherwise all movies within the collection will also be invisible to all other users.
+
+Now go to Plex settings → Manage Library Access
+For each user other than the person who is allowed to see this collection: click on their names, go to 'Restrictions' → click 'edit' next to MOVIES → under 'EXCLUDE LABELS' add the label you gave the collection. (Again IMPORTANT: Do NOT use the username tag!) and save changes. Repeat this for any "What Should I watch?" collection you have made for user(group)s.
+If you have many users this is a bit of work, but you only have to set it up once.
+
+> [!IMPORTANT]
+> Exclusion rules unfortunately do NOT work when pinning a collection to the home page. Collections pinned to "Friends' Home" will be visible to all your users, regardless of the exclusion labels. I hope they fix this at some point..
+
 
 ---
 
