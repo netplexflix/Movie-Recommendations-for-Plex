@@ -15,7 +15,7 @@ from urllib.parse import quote
 import re
 from datetime import datetime, timezone, timedelta
 
-__version__ = "3.0b"
+__version__ = "3.0b02"
 REPO_URL = "https://github.com/netplexflix/Movie-Recommendations-for-Plex"
 API_VERSION_URL = f"https://api.github.com/repos/netplexflix/Movie-Recommendations-for-Plex/releases/latest"
 
@@ -1480,21 +1480,39 @@ class PlexMovieRecommender:
         if not recommended_movies:
             print(f"{YELLOW}No movies to add labels to.{RESET}")
             return
-
+    
         if not self.config['plex'].get('add_label'):
             return
-
+    
+        # Debug: Print current config values
+        print(f"{CYAN}Debug: append_usernames={self.config['plex'].get('append_usernames')}, users={self.users}{RESET}")
+    
         if self.confirm_operations:
             selected_movies = self._user_select_recommendations(recommended_movies, "label in Plex")
             if not selected_movies:
                 return
         else:
             selected_movies = recommended_movies
-
+    
         try:
             movies_section = self.plex.library.section(self.library_title)
             label_name = self.config['plex'].get('label_name', 'Recommended')
-
+    
+            # Append usernames to label if configured
+            if self.config['plex'].get('append_usernames', False):
+                users = []
+                if self.users['tautulli_users']:
+                    users = self.users['tautulli_users']
+                else:
+                    users = self.users['managed_users']
+                
+                if users:
+                    # Allow dots by modifying the regex to exclude them from replacement
+                    sanitized_users = [re.sub(r'[^\w.]', '_', user.strip()) for user in users]
+                    user_suffix = '_'.join(sanitized_users)
+                    label_name = f"{label_name}_{user_suffix}"
+                    print(f"{CYAN}Debug: New label name = {label_name}{RESET}")  # Debug print
+    
             movies_to_update = []
             for rec in selected_movies:
                 plex_movie = next(
@@ -1505,11 +1523,14 @@ class PlexMovieRecommender:
                 if plex_movie:
                     plex_movie.reload()
                     movies_to_update.append(plex_movie)
-
+    
             if not movies_to_update:
                 print(f"{YELLOW}No matching movies found in Plex to add labels to.{RESET}")
                 return
-
+    
+            # Debug: Print label name before removal/addition
+            print(f"{CYAN}Debug: Using label '{label_name}' for operations{RESET}")
+    
             if self.config['plex'].get('remove_previous_recommendations', False):
                 print(f"{YELLOW}Finding movies with existing label: {label_name}{RESET}")
                 labeled_movies = set(movies_section.search(label=label_name))
@@ -1519,7 +1540,7 @@ class PlexMovieRecommender:
                     if label_name in current_labels:
                         movie.removeLabel(label_name)
                         print(f"{YELLOW}Removed label from: {movie.title}{RESET}")
-
+    
             print(f"{YELLOW}Adding label to recommended movies...{RESET}")
             for movie in movies_to_update:
                 current_labels = [label.tag for label in movie.labels]
@@ -1528,9 +1549,9 @@ class PlexMovieRecommender:
                     print(f"{GREEN}Added label to: {movie.title}{RESET}")
                 else:
                     print(f"{YELLOW}Label already exists on: {movie.title}{RESET}")
-
+    
             print(f"{GREEN}Successfully updated labels for recommended movies{RESET}")
-
+    
         except Exception as e:
             print(f"{RED}Error managing Plex labels: {e}{RESET}")
             import traceback
