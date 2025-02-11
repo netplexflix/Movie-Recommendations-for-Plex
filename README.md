@@ -205,10 +205,12 @@ Edit your collection, go to 'Labels' and add a new label for the collection. **I
 
 Now go to Plex settings → Manage Library Access
 For each user other than the person who is allowed to see this collection: click on their names, go to 'Restrictions' → click 'edit' next to MOVIES → under 'EXCLUDE LABELS' add the label you gave the collection. (Again IMPORTANT: Do NOT use the username tag!) and save changes. Repeat this for any "What Should I watch?" collection you have made for user(group)s.
-If you have many users this is a bit of work, but you only have to set it up once.
+
+If you have many users, I made a script to do this in bulk: [Exclusion Label Manager for Plex](https://github.com/netplexflix/Exclusion-Label-Manager-for-Plex)
 
 > [!IMPORTANT]
-> Exclusion rules unfortunately do NOT work when pinning a collection to the home page. Collections pinned to "Friends' Home" will be visible to all your users, regardless of the exclusion labels. I hope they fix this at some point..
+> Exclusion rules unfortunately do NOT work when pinning a collection to the home page.</br>
+> Collections pinned to "Friends' Home" will be visible to all your users, regardless of the exclusion labels. I hope they fix this at some point..
 
 
 ---
