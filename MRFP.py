@@ -15,7 +15,7 @@ from urllib.parse import quote
 import re
 from datetime import datetime, timezone, timedelta
 
-__version__ = "3.0b02"
+__version__ = "3.0b03"
 REPO_URL = "https://github.com/netplexflix/Movie-Recommendations-for-Plex"
 API_VERSION_URL = f"https://api.github.com/repos/netplexflix/Movie-Recommendations-for-Plex/releases/latest"
 
@@ -1069,6 +1069,60 @@ class PlexMovieRecommender:
         
         return watched_items
 
+    def _clear_trakt_watch_history(self):
+        print(f"{YELLOW}Clearing Trakt watch history...{RESET}")
+        trakt_ids = []
+        page = 1
+        per_page = 100  # Max allowed by Trakt API
+        
+        try:
+            while True:
+                response = requests.get(
+                    "https://api.trakt.tv/sync/history/movies",
+                    headers=self.trakt_headers,
+                    params={'page': page, 'limit': per_page}
+                )
+                if response.status_code != 200:
+                    print(f"{RED}Error fetching history: {response.status_code}{RESET}")
+                    break
+                
+                data = response.json()
+                if not data:
+                    break
+                
+                for item in data:
+                    if 'movie' in item and 'ids' in item['movie']:
+                        trakt_id = item['movie']['ids'].get('trakt')
+                        if trakt_id:
+                            trakt_ids.append(trakt_id)
+                
+                page += 1
+    
+            if trakt_ids:
+                remove_payload = {
+                    "movies": [
+                        {"ids": {"trakt": tid}} for tid in trakt_ids
+                    ]
+                }
+                
+                remove_response = requests.post(
+                    "https://api.trakt.tv/sync/history/remove",
+                    headers=self.trakt_headers,
+                    json=remove_payload
+                )
+                
+                if remove_response.status_code == 200:
+                    deleted = remove_response.json().get('deleted', {}).get('movies', 0)
+                    print(f"{GREEN}Removed {deleted} movies from Trakt history.{RESET}")
+                else:
+                    print(f"{RED}Failed to remove history: {remove_response.status_code}{RESET}")
+                    print(f"Response: {remove_response.text}")
+            else:
+                print(f"{YELLOW}No Trakt movie history to clear.{RESET}")
+                
+        except Exception as e:
+            print(f"{RED}Error clearing Trakt history: {e}{RESET}")
+
     def _sync_plex_watched_to_trakt(self):
         if not self.sync_watch_history:
             return
@@ -1271,6 +1325,8 @@ class PlexMovieRecommender:
     # ------------------------------------------------------------------------
     def get_recommendations(self) -> Dict[str, List[Dict]]:
         if self.sync_watch_history:
+            if self.config['trakt'].get('clear_watch_history', False):
+                self._clear_trakt_watch_history()
             self._sync_plex_watched_to_trakt()
             self._save_cache()
     
@@ -1484,9 +1540,6 @@ class PlexMovieRecommender:
         if not self.config['plex'].get('add_label'):
             return
     
-        # Debug: Print current config values
-        print(f"{CYAN}Debug: append_usernames={self.config['plex'].get('append_usernames')}, users={self.users}{RESET}")
-    
         if self.confirm_operations:
             selected_movies = self._user_select_recommendations(recommended_movies, "label in Plex")
             if not selected_movies:
@@ -1507,11 +1560,10 @@ class PlexMovieRecommender:
                     users = self.users['managed_users']
                 
                 if users:
-                    # Allow dots by modifying the regex to exclude them from replacement
-                    sanitized_users = [re.sub(r'[^\w.]', '_', user.strip()) for user in users]
+                    # Sanitize usernames and join with underscores
+                    sanitized_users = [re.sub(r'\W+', '_', user.strip()) for user in users]
                     user_suffix = '_'.join(sanitized_users)
                     label_name = f"{label_name}_{user_suffix}"
-                    print(f"{CYAN}Debug: New label name = {label_name}{RESET}")  # Debug print
     
             movies_to_update = []
             for rec in selected_movies:
@@ -1527,9 +1579,6 @@ class PlexMovieRecommender:
             if not movies_to_update:
                 print(f"{YELLOW}No matching movies found in Plex to add labels to.{RESET}")
                 return
-    
-            # Debug: Print label name before removal/addition
-            print(f"{CYAN}Debug: Using label '{label_name}' for operations{RESET}")
     
             if self.config['plex'].get('remove_previous_recommendations', False):
                 print(f"{YELLOW}Finding movies with existing label: {label_name}{RESET}")

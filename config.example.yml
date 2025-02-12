@@ -45,6 +45,7 @@ trakt:
   access_token: 
   client_id: YOUR_TRAKT_CLIENT_ID
   client_secret: YOUR_TRAKT_CLIENT_SECRET
+  clear_watch_history: false
   sync_watch_history: true
  
 TMDB:
