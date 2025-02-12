@@ -15,7 +15,7 @@ from urllib.parse import quote
 import re
 from datetime import datetime, timezone, timedelta
 
-__version__ = "3.0b04"
+__version__ = "3.0b05"
 REPO_URL = "https://github.com/netplexflix/Movie-Recommendations-for-Plex"
 API_VERSION_URL = f"https://api.github.com/repos/netplexflix/Movie-Recommendations-for-Plex/releases/latest"
 
@@ -1251,13 +1251,17 @@ class PlexMovieRecommender:
         score = 0.0
         if hasattr(movie, 'genres') and movie.genres:
             movie_genres = {g.tag.lower() for g in movie.genres}
-            gscore = 0.0
-            for mg in movie_genres:
-                gcount = user_genres.get(mg, 0)
-                gscore += (gcount / max_genre_count) if max_genre_count else 0
-            if len(movie_genres) > 0:
-                gscore /= len(movie_genres)
-            score += gscore * weights.get('genre_weight', 0.25)
+            genre_scores = [user_genres.get(g, 0) for g in movie_genres]
+            
+            if genre_scores:
+                max_genre = max(genre_scores)
+                
+                genre_contribution = (max_genre ** 2)
+                
+                base_genre_weight = weights.get('genre_weight', 0.25)
+                adjusted_weight = base_genre_weight * (1 + (max_genre / 10))
+                
+                score += genre_contribution * adjusted_weight
 
         if hasattr(movie, 'directors') and movie.directors:
             dscore = 0.0
@@ -1798,8 +1802,8 @@ def format_movie_output(movie: Dict,
         output += f"\n  {YELLOW}Language:{RESET} {movie['language']}"
 
     if show_rating and 'ratings' in movie:
-        rating = movie['ratings'].get('rating', 0) or movie['ratings'].get('rating', 0)
-        if rating > 0:
+        rating = movie['ratings'].get('Rating') or movie['ratings'].get('rating')
+        if rating:
             votes_str = ""
             if 'votes' in movie['ratings']:
                 votes_str = f" ({movie['ratings']['votes']} votes)"
