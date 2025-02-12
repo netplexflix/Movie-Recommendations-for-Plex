@@ -15,7 +15,7 @@ from urllib.parse import quote
 import re
 from datetime import datetime, timezone, timedelta
 
-__version__ = "3.0b03"
+__version__ = "3.0b04"
 REPO_URL = "https://github.com/netplexflix/Movie-Recommendations-for-Plex"
 API_VERSION_URL = f"https://api.github.com/repos/netplexflix/Movie-Recommendations-for-Plex/releases/latest"
 
@@ -1144,12 +1144,12 @@ class PlexMovieRecommender:
         print(f"DEBUG: Found {len(watched_items)} watched items")
         
         synced_movie_ids = set()
-        if os.path.exists(self.trakt_cache_path):
+        if (not self.config['trakt'].get('clear_watch_history', False) and 
+            os.path.exists(self.trakt_cache_path)):
             try:
-                with open(self.trakt_cache_path, 'r', encoding='utf-8') as f:
+                with open(self.trakt_cache_path, 'r') as f:
                     cache_data = json.load(f)
                     synced_movie_ids = set(cache_data.get('synced_movie_ids', []))
-                    print(f"DEBUG: Loaded {len(synced_movie_ids)} synced IDs from cache")
             except Exception as e:
                 print(f"{YELLOW}Error loading Trakt cache: {e}{RESET}")
         
@@ -1324,9 +1324,19 @@ class PlexMovieRecommender:
     # GET RECOMMENDATIONS
     # ------------------------------------------------------------------------
     def get_recommendations(self) -> Dict[str, List[Dict]]:
+        # Handle clear history first (independent of sync_watch_history)
+        if self.config['trakt'].get('clear_watch_history', False):
+            self._clear_trakt_watch_history()
+            # Clear the sync cache after history removal
+            if os.path.exists(self.trakt_cache_path):
+                try:
+                    os.remove(self.trakt_cache_path)
+                    print(f"{GREEN}Cleared Trakt sync cache{RESET}")
+                except Exception as e:
+                    print(f"{RED}Error clearing cache: {e}{RESET}")
+    
+        # Then handle sync if enabled
         if self.sync_watch_history:
-            if self.config['trakt'].get('clear_watch_history', False):
-                self._clear_trakt_watch_history()
             self._sync_plex_watched_to_trakt()
             self._save_cache()
     
