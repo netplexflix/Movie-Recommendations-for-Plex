@@ -145,10 +145,7 @@ paths:
 ### Trakt
 - Your Trakt API credentials can be found in Trakt under settings => [Your Trakt Apps](https://trakt.tv/oauth/applications) [More info here](https://trakt.docs.apiary.io/#)
 - **sync_watch_history:** Can be set to `false` if you already build your Trakt watch history another way (e.g.: through Trakt's Plex Scrobbler).
-
-> [!IMPORTANT]
-> The Trakt watch history sync is **one way**. That means that if you're doing different runs for different users, their combined watch history will be synced to Trakt and recommendations will be based on their combined profile.
-> You can manually remove items from watch history within Trakt. To remove large batches of watch history you'll have to create a support ticket with Trakt.
+- **clear_watch_history:** `true` will erase your Trakt movie watch history (before syncing). This is recommended if you're doing multiple runs for different user(group)s.
 
 ### TMDB Settings
 - **use_TMDB_keywords:** `true` uses TMDB (plot)keywords for matching (Recommended). In this case an api_key is required.
@@ -156,14 +153,15 @@ paths:
 
 ### Weights
 - Here you can change the 'weight' or 'importance' some parameters have. Make sure the sum of the weights adds up to 1.
-- **userRating_multipliers:** `true` uses your user ratings, if available, to scale the impact.
 
-> [!NOTE]  
+> [!NOTE]
+> If you use **User Ratings**, these will be used as multipliers to scale the impact.</br>
+> 
 > **Example:** </br>
-> Without **userRating_multipliers** if you watch a lot of movies by Director X, the algorithm will assume you enjoy watching their movies and will score 'Director X' highly.</br>
+> If you watch a lot of movies by Director X, the algorithm will assume you enjoy watching their movies and will score 'Director X' highly.</br>
 > However it is theoretically possible that you rated all of their movies really poorly (e.g; 1 star)</br>
 > meaning that even though you watched a lot of movies directed by Director X, you don't like them.</br>
-> Enabling **userRating_multipliers** will take this into account and will make sure that in this example, Movies by Director X will will have a much lower similarity score.</br>
+> The algorithm will take this into account and will make sure that in this example, Movies by Director X will have a much lower similarity score.</br>
 > The opposite is also true; If you watched only 2 movies by director Y but you rated both really high, then their movies will have a higher similarity score.</br>
 > Movies without UserRating are not affected.
 
@@ -206,7 +204,7 @@ Edit your collection, go to 'Labels' and add a new label for the collection. **I
 Now go to Plex settings → Manage Library Access
 For each user other than the person who is allowed to see this collection: click on their names, go to 'Restrictions' → click 'edit' next to MOVIES → under 'EXCLUDE LABELS' add the label you gave the collection. (Again IMPORTANT: Do NOT use the username tag!) and save changes. Repeat this for any "What Should I watch?" collection you have made for user(group)s.
 
-If you have many users, I made a script to do this in bulk: [Exclusion Label Manager for Plex](https://github.com/netplexflix/Exclusion-Label-Manager-for-Plex)
+If you have many users, I made a script to do this in bulk: 🏷️[User Restrictions Label Manager for Plex](https://github.com/netplexflix/User-Restrictions-Label-Manager-for-Plex)
 
 > [!IMPORTANT]
 > Exclusion rules unfortunately do NOT work when pinning a collection to the home page.</br>
