@@ -26,6 +26,7 @@ Also check out [TV Show Recommendations for Plex](https://github.com/netplexflix
 - ☑ **Selection**: Confirm recommendations to label and/or add to Radarr, or have it run unattended
 - 🔍 **Genre Filtering**: Excludes unwanted genres from recommendations
 - 🛠️ **Customizable**: Choose which parameters matter to you
+- 📊 **Rating Multipliers**: Uses User ratings (if present) to improve user profile
 - ☑️ **Trakt Integration**: Uploads your Plex watch history to Trakt if needed and gets personalized recommendations
 - 🗃️ **Caching**: Keeps a cache of operations to speed up subsequent runs, limit API calls, and avoid duplicates while syncing
 - 💾 **Path Mapping**: Supports different system configurations (NAS, Linux, Windows)
