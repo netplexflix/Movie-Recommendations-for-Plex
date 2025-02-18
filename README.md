@@ -35,11 +35,12 @@ Also check out [TV Show Recommendations for Plex](https://github.com/netplexflix
 ---
 ## 🧙‍♂️ How are recommendations picked?
 
-The script checks your Plex library for watched movies and notes its characteristics, such as genres, director, actors, rating,  language, TMDB keywords, ...
-It keeps a frequency count of how often each of these characteristics were found to build a profile on what you like watching.
+The script checks your Plex library for watched movies and notes its characteristics, such as genres, director, actors, rating,  language, plot keywords, themes, etc...
+It keeps a frequency count of how often each of these characteristics were found to build a profile on what you like watching. 
+If you use Plex's user Ratings to rate your movies, the script will use these to better understand what you like or dislike.
 
-**For each unwatched Plex movie**, it calculates a similarity score based on how many of those familiar elements it shares with your watch profile, giving extra weight to those you watch more frequently.
-It also factors in external ratings (e.g. IMDb), then randomly selects from the top matches to avoid repetitive lists.</br>
+**For each unwatched Plex movie**, it calculates a similarity score based on how many of those familiar elements it shares with your watch profile, giving extra weight to those you watch more frequently and rate highly.
+It also factors in external ratings and  then randomly selects from the top matches to avoid repetitive lists.</br>
 
 **For suggestions outside your existing library**, the script uses your watch history to query Trakt for its built-in movie recommendations algorithm.
 It excludes any titles already in your Plex library or containing excluded genres and randomly samples from the top-rated portion of Trakt’s suggestions, ensuring variety across runs.
