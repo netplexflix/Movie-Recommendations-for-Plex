@@ -15,7 +15,7 @@ from urllib.parse import quote
 import re
 from datetime import datetime, timezone, timedelta
 
-__version__ = "3.0b06"
+__version__ = "3.0b07"
 REPO_URL = "https://github.com/netplexflix/Movie-Recommendations-for-Plex"
 API_VERSION_URL = f"https://api.github.com/repos/netplexflix/Movie-Recommendations-for-Plex/releases/latest"
 
@@ -1197,13 +1197,10 @@ class PlexMovieRecommender:
         
         # Get watched movies based on configuration
         if self.users['tautulli_users']:
-            print("DEBUG: Getting Tautulli watch history")
             watched_items = self._get_tautulli_watched_for_sync()
         else:
-            print("DEBUG: Getting Plex managed users watch history")
             watched_items = self._get_plex_managed_users_watched_for_sync()
         
-        print(f"DEBUG: Found {len(watched_items)} watched items")
         
         synced_movie_ids = set()
         if (not self.config['trakt'].get('clear_watch_history', False) and 
@@ -1225,7 +1222,6 @@ class PlexMovieRecommender:
                     continue
                     
                 if rating_key in synced_movie_ids:
-                    print(f"DEBUG: Skipping already synced movie: {rating_key}")
                     continue
                     
                 movie = movies_section.fetchItem(int(rating_key))
@@ -1233,7 +1229,6 @@ class PlexMovieRecommender:
                     'movie': movie,
                     'watched_at': item['last_watched']
                 })
-                print(f"DEBUG: Adding to sync: {movie.title} ({rating_key})")
                     
             except Exception as e:
                 print(f"{YELLOW}Error processing {rating_key}: {str(e)}{RESET}")
@@ -1885,18 +1880,42 @@ ANSI_PATTERN = re.compile(r'\x1b\[[0-9;]*m')
 class TeeLogger:
     """
     A simple 'tee' class that writes to both console and a file,
-    stripping ANSI color codes for the file.
+    stripping ANSI color codes for the file and handling Unicode characters.
     """
     def __init__(self, logfile):
         self.logfile = logfile
+        # Force UTF-8 encoding for stdout
+        if hasattr(sys.stdout, 'buffer'):
+            self.stdout_buffer = sys.stdout.buffer
+        else:
+            self.stdout_buffer = sys.stdout
     
     def write(self, text):
-        sys.__stdout__.write(text)
-        stripped = ANSI_PATTERN.sub('', text)
-        self.logfile.write(stripped)
+        try:
+            # Write to console
+            if hasattr(sys.stdout, 'buffer'):
+                self.stdout_buffer.write(text.encode('utf-8'))
+            else:
+                sys.__stdout__.write(text)
+            
+            # Write to file (strip ANSI codes)
+            stripped = ANSI_PATTERN.sub('', text)
+            self.logfile.write(stripped)
+        except UnicodeEncodeError:
+            # Fallback for problematic characters
+            safe_text = text.encode('ascii', 'replace').decode('ascii')
+            if hasattr(sys.stdout, 'buffer'):
+                self.stdout_buffer.write(safe_text.encode('utf-8'))
+            else:
+                sys.__stdout__.write(safe_text)
+            stripped = ANSI_PATTERN.sub('', safe_text)
+            self.logfile.write(stripped)
     
     def flush(self):
-        sys.__stdout__.flush()
+        if hasattr(sys.stdout, 'buffer'):
+            self.stdout_buffer.flush()
+        else:
+            sys.__stdout__.flush()
         self.logfile.flush()
 
 def cleanup_old_logs(log_dir: str, keep_logs: int):
@@ -1916,6 +1935,8 @@ def cleanup_old_logs(log_dir: str, keep_logs: int):
                 print(f"{YELLOW}Failed to remove old log {f}: {e}{RESET}")
 
 def main():
+    if sys.stdout.encoding.lower() != 'utf-8':
+        sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=1)
     start_time = datetime.now()
     print(f"{CYAN}Movie Recommendations for Plex{RESET}")
     print("-" * 50)
