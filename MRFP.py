@@ -15,7 +15,7 @@ from urllib.parse import quote
 import re
 from datetime import datetime, timezone, timedelta
 
-__version__ = "3.0b08"
+__version__ = "3.0b09"
 REPO_URL = "https://github.com/netplexflix/Movie-Recommendations-for-Plex"
 API_VERSION_URL = f"https://api.github.com/repos/netplexflix/Movie-Recommendations-for-Plex/releases/latest"
 
@@ -1441,30 +1441,39 @@ class PlexMovieRecommender:
         if plex_recs:
             excluded_recs = [m for m in plex_recs if any(g in self.exclude_genres for g in m['genres'])]
             included_recs = [m for m in plex_recs if not any(g in self.exclude_genres for g in m['genres'])]
-    
+        
             print(f"Excluded {len(excluded_recs)} movies based on excluded genres.")
-    
+            print(f"Calculating similarity scores...")
+        
             if not included_recs:
                 print(f"{YELLOW}No unwatched movies left after applying genre exclusions.{RESET}")
                 plex_recs = []
             else:
-                plex_recs = included_recs
-                plex_recs.sort(
-                    key=lambda x: (
-                        x.get('ratings', {}).get('rating', 0),
-                        x.get('similarity_score', 0)
-                    ),
-                    reverse=True
-                )
-                top_count = max(int(len(plex_recs) * 0.5), self.limit_plex_results)
-                top_by_rating = plex_recs[:top_count]
-    
-                top_by_rating.sort(key=lambda x: x.get('similarity_score', 0), reverse=True)
-                final_count = max(int(len(top_by_rating) * 0.3), self.limit_plex_results)
-                final_pool = top_by_rating[:final_count]
-    
-                if final_pool:
-                    plex_recs = random.sample(final_pool, min(self.limit_plex_results, len(final_pool)))
+                movies_section = self.plex.library.section(self.library_title)
+                scored_movies = []
+                total_movies = len(included_recs)
+                
+                for i, movie_info in enumerate(included_recs, 1):
+                    self._show_progress("Processing", i, total_movies)
+                    try:
+                        plex_movie = next(
+                            (m for m in movies_section.search(title=movie_info['title'])
+                             if m.year == movie_info.get('year')), 
+                            None
+                        )
+                        if plex_movie:
+                            similarity_score = self.calculate_movie_score(plex_movie)
+                            movie_info['similarity_score'] = similarity_score
+                            scored_movies.append(movie_info)
+                    except Exception as e:
+                        continue
+        
+                scored_movies.sort(key=lambda x: x['similarity_score'], reverse=True)
+                top_count = max(int(len(scored_movies) * 0.2), self.limit_plex_results)
+                top_pool = scored_movies[:top_count]
+        
+                if top_pool:
+                    plex_recs = random.sample(top_pool, min(self.limit_plex_results, len(top_pool)))
                 else:
                     plex_recs = []
         else:
