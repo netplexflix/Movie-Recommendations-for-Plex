@@ -15,7 +15,7 @@ from urllib.parse import quote
 import re
 from datetime import datetime, timezone, timedelta
 
-__version__ = "3.0b07"
+__version__ = "3.0b08"
 REPO_URL = "https://github.com/netplexflix/Movie-Recommendations-for-Plex"
 API_VERSION_URL = f"https://api.github.com/repos/netplexflix/Movie-Recommendations-for-Plex/releases/latest"
 
@@ -688,10 +688,26 @@ class PlexMovieRecommender:
     # ------------------------------------------------------------------------
     # LIBRARY UTILITIES
     # ------------------------------------------------------------------------
-    def _get_library_movies_set(self) -> Set[Tuple[str, Optional[int]]]:
+    def _get_library_movies_set(self) -> Set[tuple]:
         try:
             movies = self.plex.library.section(self.library_title)
-            return {(movie.title.lower(), getattr(movie, 'year', None)) for movie in movies.all()}
+            library_movies = set()
+            for movie in movies.all():
+                # Handle both normal titles and titles with embedded years
+                title = movie.title.lower()
+                year = getattr(movie, 'year', None)
+                
+                # Add normal version
+                library_movies.add((title, year))
+                
+                # Check for and strip embedded year pattern
+                year_match = re.search(r'\s*\((\d{4})\)$', title)
+                if year_match:
+                    clean_title = title.replace(year_match.group(0), '').strip()
+                    embedded_year = int(year_match.group(1))
+                    library_movies.add((clean_title, embedded_year))
+                    
+            return library_movies
         except Exception as e:
             print(f"{RED}Error getting library movies: {e}{RESET}")
             return set()
@@ -711,12 +727,32 @@ class PlexMovieRecommender:
         return imdb_ids
 
     def _is_movie_in_library(self, title: str, year: Optional[int], imdb_id: Optional[str] = None) -> bool:
-        if (title.lower(), year) in self.library_movies:
-            return True
+        if not title:
+            return False
+            
+        title_lower = title.lower()
+        
+        # First check IMDb ID if available
         if imdb_id and imdb_id in self.library_imdb_ids:
             return True
-    
-        return False
+        
+        # Check for year in title and strip it if found
+        year_match = re.search(r'\s*\((\d{4})\)$', title_lower)
+        if year_match:
+            clean_title = title_lower.replace(year_match.group(0), '').strip()
+            embedded_year = int(year_match.group(1))
+            if (clean_title, embedded_year) in self.library_movies:
+                return True
+        
+        # Check both with and without year
+        if (title_lower, year) in self.library_movies:
+            return True
+            
+        # Check title-only matches
+        return any(lib_title == title_lower or 
+                  lib_title == f"{title_lower} ({year})" or
+                  lib_title.replace(f" ({year})", "") == title_lower 
+                  for lib_title, lib_year in self.library_movies)
 
     def _get_movie_language(self, movie) -> str:
         try:
@@ -1681,42 +1717,42 @@ class PlexMovieRecommender:
         if not recommended_movies:
             print(f"{YELLOW}No movies to add to Radarr.{RESET}")
             return
-
+    
         if not self.radarr_config.get('add_to_radarr'):
             return
-
+    
         if self.confirm_operations:
             selected_movies = self._user_select_recommendations(recommended_movies, "add to Radarr")
             if not selected_movies:
                 return
         else:
             selected_movies = recommended_movies
-
+    
         try:
             if 'radarr' not in self.config:
                 raise ValueError("Radarr configuration missing from config file")
-
+    
             required_fields = ['url', 'api_key', 'root_folder', 'quality_profile']
             missing_fields = [f for f in required_fields if f not in self.radarr_config]
             if missing_fields:
                 raise ValueError(f"Missing required Radarr config fields: {', '.join(missing_fields)}")
-
+    
             radarr_url = self.radarr_config['url'].rstrip('/')
             if '/api/' not in radarr_url:
                 radarr_url += '/api/v3'
-
+    
             headers = {
                 'X-Api-Key': self.radarr_config['api_key'],
                 'Content-Type': 'application/json'
             }
             trakt_headers = self.trakt_headers
-
+    
             try:
                 test_response = requests.get(f"{radarr_url}/system/status", headers=headers)
                 test_response.raise_for_status()
             except requests.exceptions.RequestException as e:
                 raise ValueError(f"Failed to connect to Radarr: {str(e)}")
-
+    
             tag_id = None
             if self.radarr_config.get('radarr_tag'):
                 tags_response = requests.get(f"{radarr_url}/tag", headers=headers)
@@ -1734,7 +1770,7 @@ class PlexMovieRecommender:
                     tag_response.raise_for_status()
                     tag_id = tag_response.json()['id']
                     print(f"{GREEN}Created new Radarr tag: {self.radarr_config['radarr_tag']} (ID: {tag_id}){RESET}")
-
+    
             profiles_response = requests.get(f"{radarr_url}/qualityprofile", headers=headers)
             profiles_response.raise_for_status()
             quality_profiles = profiles_response.json()
@@ -1750,26 +1786,30 @@ class PlexMovieRecommender:
                     f"Available: {', '.join(available)}"
                 )
             quality_profile_id = desired_profile['id']
-
+    
             existing_response = requests.get(f"{radarr_url}/movie", headers=headers)
             existing_response.raise_for_status()
             existing_movies = existing_response.json()
             existing_tmdb_ids = {m['tmdbId'] for m in existing_movies}
-
+    
+            # Define should_monitor before the movie loop
+            should_monitor = self.radarr_config.get('monitor', False)
+            root_folder = self._map_path(self.radarr_config['root_folder'].rstrip('/\\'))
+    
             for movie in selected_movies:
                 try:
                     trakt_search_url = f"https://api.trakt.tv/search/movie?query={quote(movie['title'])}"
                     if movie.get('year'):
                         trakt_search_url += f"&years={movie['year']}"
-
+    
                     trakt_response = requests.get(trakt_search_url, headers=trakt_headers)
                     trakt_response.raise_for_status()
                     trakt_results = trakt_response.json()
-
+    
                     if not trakt_results:
                         print(f"{YELLOW}Movie not found on Trakt: {movie['title']}{RESET}")
                         continue
-
+    
                     trakt_movie = next(
                         (r for r in trakt_results
                          if r['movie']['title'].lower() == movie['title'].lower()
@@ -1780,49 +1820,89 @@ class PlexMovieRecommender:
                     if not tmdb_id:
                         print(f"{YELLOW}No TMDB ID found for {movie['title']}{RESET}")
                         continue
-
+    
                     if tmdb_id in existing_tmdb_ids:
-                        print(f"{YELLOW}Already in Radarr: {movie['title']}{RESET}")
-                        continue
-
-                    root_folder = self._map_path(self.radarr_config['root_folder'].rstrip('/\\'))
-                    should_monitor = self.radarr_config.get('monitor', False)
-
+                        existing_movie = next(m for m in existing_movies if m['tmdbId'] == tmdb_id)
+                        
+                        if should_monitor and not existing_movie['monitored']:
+                            print(f"{YELLOW}Movie already in Radarr (unmonitored): {movie['title']}{RESET}")
+                            print(f"{GREEN}Updating monitoring status...{RESET}")
+                            
+                            try:
+                                # Get current movie data
+                                movie_response = requests.get(
+                                    f"{radarr_url}/movie/{existing_movie['id']}", 
+                                    headers=headers
+                                )
+                                movie_response.raise_for_status()
+                                update_data = movie_response.json()
+                                
+                                # Update monitoring status and force search
+                                update_data['monitored'] = True
+                                update_data['searchForMovie'] = True  # Add this at root level
+                                
+                                # Update the movie
+                                update_resp = requests.put(
+                                    f"{radarr_url}/movie/{existing_movie['id']}", 
+                                    headers=headers, 
+                                    json=update_data
+                                )
+                                update_resp.raise_for_status()
+                                
+                                # Now trigger a search command explicitly
+                                search_cmd = {
+                                    'name': 'MoviesSearch',
+                                    'movieIds': [existing_movie['id']]
+                                }
+                                sr = requests.post(f"{radarr_url}/command", headers=headers, json=search_cmd)
+                                sr.raise_for_status()
+                                
+                                print(f"{GREEN}Updated monitoring and triggered search for: {movie['title']}{RESET}")
+                                
+                            except requests.exceptions.RequestException as e:
+                                print(f"{RED}Error updating {movie['title']} in Radarr: {str(e)}{RESET}")
+                                if hasattr(e, 'response') and e.response is not None:
+                                    try:
+                                        error_details = e.response.json()
+                                        print(f"{RED}Radarr error details: {json.dumps(error_details, indent=2)}{RESET}")
+                                    except:
+                                        print(f"{RED}Radarr error response: {e.response.text}{RESET}")
+                            continue
+                        else:
+                            print(f"{YELLOW}Already in Radarr: {movie['title']}{RESET}")
+                            continue
+    
                     movie_data = {
                         'tmdbId': tmdb_id,
                         'monitored': should_monitor,
                         'qualityProfileId': quality_profile_id,
                         'minimumAvailability': 'released',
+                        'searchForMovie': should_monitor,
                         'addOptions': {'searchForMovie': should_monitor},
                         'rootFolderPath': root_folder,
                         'title': movie['title']
                     }
                     if tag_id is not None:
                         movie_data['tags'] = [tag_id]
-
+    
                     add_resp = requests.post(f"{radarr_url}/movie", headers=headers, json=movie_data)
                     add_resp.raise_for_status()
-
+    
                     if should_monitor:
-                        new_id = add_resp.json()['id']
-                        search_cmd = {'name': 'MoviesSearch', 'movieIds': [new_id]}
-                        sr = requests.post(f"{radarr_url}/command", headers=headers, json=search_cmd)
-                        sr.raise_for_status()
-                        print(f"{GREEN}Triggered download search for: {movie['title']}{RESET}")
+                        print(f"{GREEN}Added and triggered search for: {movie['title']}{RESET}")
                     else:
-                        print(f"{YELLOW}Movie added but not monitored: {movie['title']}{RESET}")
-
+                        print(f"{YELLOW}Added but not monitored: {movie['title']}{RESET}")
+    
                 except requests.exceptions.RequestException as e:
-                    print(f"{RED}Error adding {movie['title']} to Radarr: {str(e)}{RESET}")
+                    print(f"{RED}Error processing {movie['title']}: {str(e)}{RESET}")
                     if hasattr(e, 'response') and e.response is not None:
-                        raw_error = e.response.text
                         try:
-                            corrected_error = raw_error.encode('utf-8').decode('unicode_escape')
-                        except UnicodeDecodeError:
-                            corrected_error = raw_error
-                        print(f"{RED}Radarr error response: {corrected_error}{RESET}")
+                            error_details = e.response.json()
+                            print(f"{RED}Radarr error details: {json.dumps(error_details, indent=2)}{RESET}")
+                        except:
+                            print(f"{RED}Radarr error response: {e.response.text}{RESET}")
                     continue
-
+    
         except Exception as e:
             print(f"{RED}Error adding movies to Radarr: {e}{RESET}")
             import traceback
