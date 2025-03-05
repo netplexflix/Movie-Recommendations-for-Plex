@@ -1,9 +1,13 @@
 general:
   confirm_operations: true
-  plex_only: false
+  plex_only: true
+  combine_watch_history: false
   limit_plex_results: 3
   limit_trakt_results: 3
   exclude_genre: animation, documentary,
+  randomize_recommendations: true
+  normalize_counters: false
+  show_genres: true
   show_summary: false
   show_cast: true
   show_director: true
@@ -11,6 +15,7 @@ general:
   show_rating: true
   show_imdb_link: true
   keep_logs: 10
+
 
 paths:
   path_mappings: null
@@ -37,9 +42,10 @@ radarr:
   root_folder: P:\Movies
   add_to_radarr: true
   monitor: true
+  search_for_movie: true
   quality_profile: HD-1080p
   radarr_tag: RecommendForPlex
-
+  append_usernames: true
 
 trakt:
   access_token: 
@@ -49,7 +55,6 @@ trakt:
   sync_watch_history: true
  
 TMDB:
-  use_TMDB_keywords: true
   api_key: YOUR_TMDB_API_KEY
 
 weights: #Make sure the total equals 1
