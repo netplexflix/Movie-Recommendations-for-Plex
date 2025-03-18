@@ -1,9 +1,13 @@
 general:
   confirm_operations: true
-  plex_only: false
+  plex_only: true
+  combine_watch_history: false
   limit_plex_results: 3
   limit_trakt_results: 3
   exclude_genre: animation, documentary,
+  randomize_recommendations: true
+  normalize_counters: false
+  show_genres: true
   show_summary: false
   show_cast: true
   show_director: true
@@ -12,6 +16,7 @@ general:
   show_imdb_link: true
   keep_logs: 10
 
+
 paths:
   path_mappings: null
   platform: windows
@@ -19,10 +24,17 @@ paths:
 plex:
   url: http://localhost:32400
   token: YOUR_PLEX_TOKEN
+  managed_users: Admin #Options: 'Admin' or specify user(s) (comma separated)
   movie_library_title: Movies
   add_label: true
   label_name: RecommendedMovies
+  append_usernames: true
   remove_previous_recommendations: true
+
+tautulli:
+  url: http://localhost:8181
+  api_key: YOUR_TAUTULLI_API_KEY
+  users: None  #using Tautulli users will override managed_users! options: 'None', 'All' or specify users (comma separated)
 
 radarr:
   url: http://localhost:7878
@@ -30,22 +42,22 @@ radarr:
   root_folder: P:\Movies
   add_to_radarr: true
   monitor: true
+  search_for_movie: true
   quality_profile: HD-1080p
   radarr_tag: RecommendForPlex
-
+  append_usernames: true
 
 trakt:
   access_token: 
   client_id: YOUR_TRAKT_CLIENT_ID
   client_secret: YOUR_TRAKT_CLIENT_SECRET
+  clear_watch_history: false
   sync_watch_history: true
  
 TMDB:
-  use_TMDB_keywords: true
   api_key: YOUR_TMDB_API_KEY
 
 weights: #Make sure the total equals 1
-  userRating_multipliers: true
   genre_weight: 0.25
   keyword_weight: 0.25
   director_weight: 0.20
