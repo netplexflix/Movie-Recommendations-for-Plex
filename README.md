@@ -78,9 +78,11 @@ Rename `config.example.yml` to `config.yml` and set up your credentials and pref
 ### General
 - **confirm_operations:** `true` will prompt you for extra confirmation for applying labels in plex (If `add_label` is `true`) or adding to radarr (If `add_to_radarr` is `true`)
 - **plex_only:** Set to `true` if you only want recommendations among your unwatched Plex Movies. Set to `false` if you also want external recommendations (to optionally add to Radarr).
+- **combine_watch_history:** `true` will treat multiple users entered as a single group. `false` will do consecutive indivdual runs.
 - **limit_plex_results:** Limit amount of recommended unwatched movies from within your Plex library.
 - **limit_trakt_results:** Limit amount of recommended movies from outside your Plex library.
 - **exclude_genre:** Genres to exclude. E.g. "animation, documentary".
+- **randomize_recommendations:** `true` will randomize recommendations from the top 10% matches to ensure variety across runs. `false` will order by similarity score.
 - **show_summary:** `true` will show you a brief plot summary for each movie.
 - **show_cast:** `true` will show top 3 cast members.
 - **show_director:** `true` will show the director.
@@ -141,16 +143,20 @@ paths:
 - **root_folder:** Change to your Movies root folder
 - **add_to_radarr:** Set to `true` if you want to add Trakt recommendations to Radarr. (Requires `plex_only:` `false`)
 - **monitor:** `true` will add movies as monitored and trigger a search. `false` will add them unmonitored without searching.
+- **search_for_movie:** `true` triggers a search after adding a movie
 - **quality_profile:** Name of the quality profile to be used when adding movies
 - **radarr_tag:** Add a Radarr tag to added movies
- 
+- **append_usernames:** `true` appends the username(s) to the radarr_tag
+  
 ### Trakt
 - Your Trakt API credentials can be found in Trakt under settings => [Your Trakt Apps](https://trakt.tv/oauth/applications) [More info here](https://trakt.docs.apiary.io/#)
 - **sync_watch_history:** Can be set to `false` if you already build your Trakt watch history another way (e.g.: through Trakt's Plex Scrobbler).
 - **clear_watch_history:** `true` will erase your Trakt movie watch history (before syncing). This is recommended if you're doing multiple runs for different user(group)s.
 
+> [!WARNING]
+> If you already have a populated Trakt account and want to analyze other users on your server, it is highly recommended to create a new Trakt account for use with this script. clear_watch_history needs to be enabled if you're doing runs for different users in order for Trakt to only take the relevant watch history of the given user(s) into account. This will wipe ALL history first and then sync again. Any history you had on Trakt that came from outside of Plex will be gone forever.
+
 ### TMDB Settings
-- **use_TMDB_keywords:** `true` uses TMDB (plot)keywords for matching (Recommended). In this case an api_key is required.
 - **api_key:** [How to get a TMDB API Key](https://developer.themoviedb.org/docs/getting-started)
 
 ### Weights
