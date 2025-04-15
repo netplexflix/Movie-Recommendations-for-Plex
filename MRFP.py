@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 import math
 import copy
 
-__version__ = "3.1"
+__version__ = "3.2"
 REPO_URL = "https://github.com/netplexflix/Movie-Recommendations-for-Plex"
 API_VERSION_URL = f"https://api.github.com/repos/netplexflix/Movie-Recommendations-for-Plex/releases/latest"
 
@@ -327,17 +327,6 @@ class MovieCache:
         except Exception as e:
             print(f"DEBUG: Language detection failed: {str(e)}")
         return "N/A"
-
-    def cleanup_removed_movies(self):
-        """Remove movies from cache that no longer exist in the library"""
-        current_movies = set(str(movie.ratingKey) for movie in self.plex.library.section(self.library_title).all())
-        removed = set(self.cache['movies'].keys()) - current_movies
-        
-        if removed:
-            print(f"{YELLOW}Removing {len(removed)} movies from cache that are no longer in library{RESET}")
-            for movie_id in removed:
-                del self.cache['movies'][movie_id]
-            self._save_cache()
 			
 class PlexMovieRecommender:
     def __init__(self, config_path: str, single_user: str = None):
@@ -1274,16 +1263,6 @@ class PlexMovieRecommender:
         except Exception as e:
             print(f"{YELLOW}Error getting movie details for {movie.title}: {e}{RESET}")
             return {}
-    
-    def _validate_watched_movies(self):
-        """Ensure all watched movie IDs are valid integers"""
-        cleaned_ids = set()
-        for movie_id in self.watched_movie_ids:
-            try:
-                cleaned_ids.add(int(str(movie_id)))
-            except (ValueError, TypeError):
-                print(f"{YELLOW}Invalid watched movie ID found: {movie_id}{RESET}")
-        self.watched_movie_ids = cleaned_ids
     
     def _extract_genres(self, movie) -> List[str]:
         """Extract genres from a movie"""
@@ -3001,48 +2980,6 @@ def cleanup_old_logs(log_dir: str, keep_logs: int):
 # ------------------------------------------------------------------------
 # MAIN
 # ------------------------------------------------------------------------
-def process_recommendations(recommender, recommendations):
-    print(f"\n{GREEN}=== Recommended Unwatched Movies in Your Library ==={RESET}")
-    plex_recs = recommendations.get('plex_recommendations', [])
-    if plex_recs:
-        for i, movie in enumerate(plex_recs, start=1):
-            print(format_movie_output(
-                movie,
-                show_summary=recommender.show_summary,
-                index=i,
-                show_cast=recommender.show_cast,
-                show_director=recommender.show_director,
-                show_language=recommender.show_language,
-                show_rating=recommender.show_rating,
-                show_genres=recommender.show_genres,
-                show_imdb_link=recommender.show_imdb_link
-            ))
-            print()
-        recommender.manage_plex_labels(plex_recs)
-    else:
-        print(f"{YELLOW}No recommendations found in your Plex library matching your criteria.{RESET}")
- 
-    if not recommender.plex_only:
-        print(f"\n{GREEN}=== Recommended Movies to Add to Your Library ==={RESET}")
-        trakt_recs = recommendations.get('trakt_recommendations', [])
-        if trakt_recs:
-            for i, movie in enumerate(trakt_recs, start=1):
-                print(format_movie_output(
-                    movie,
-                    show_summary=recommender.show_summary,
-                    index=i,
-                    show_cast=recommender.show_cast,
-                    show_director=recommender.show_director,
-                    show_language=recommender.show_language,
-                    show_rating=recommender.show_rating,
-                    show_genres=recommender.show_genres,
-                    show_imdb_link=recommender.show_imdb_link
-                ))
-                print()
-            recommender.add_to_radarr(trakt_recs)
-        else:
-            print(f"{YELLOW}No Trakt recommendations found matching your criteria.{RESET}")
-
 def process_recommendations(config, config_path, keep_logs, single_user=None):
     original_stdout = sys.stdout
     log_dir = os.path.join(os.path.dirname(__file__), 'Logs')
